@@ -2,6 +2,9 @@
 
 #include <stdlib.h>
 
+/* Base presentation colors. Logical color zero is also the blank paper color
+ * and remains invariant; colors 1..5 may be transformed by the Linux renderer
+ * before future writes snapshot them into the ink plane. */
 const uint32_t TURMITE_DISPLAY_BASE_PALETTE[TURMITE_COLORS] = {
     0x000000u, /* black */
     0xF2F2F2u, /* white */
@@ -11,6 +14,9 @@ const uint32_t TURMITE_DISPLAY_BASE_PALETTE[TURMITE_COLORS] = {
     0x4EA5D9u  /* blue */
 };
 
+/* Allocate the logical tape and Linux visual paper as flat row-major arrays.
+ * Keeping indexing trivial is important because every ant instruction touches
+ * the tape and the renderer scans the ink plane every frame. */
 int world_init(World *world, int width, int height)
 {
     if (!world || width <= 0 || height <= 0 || width > 65535 || height > 65535) return -1;
@@ -86,6 +92,8 @@ void world_set_ink_palette(World *world, const uint32_t palette[TURMITE_COLORS])
         atomic_store_explicit(&world->ink_palette[i], palette[i] & 0x00ffffffu, memory_order_relaxed);
 }
 
+/* Coordinates wrap toroidally. This helper is used by cold/control paths;
+ * the ant hot loop uses equivalent branch-based wrapping to avoid modulo cost. */
 size_t world_index(const World *world, int x, int y)
 {
     int xx = x % world->width;
