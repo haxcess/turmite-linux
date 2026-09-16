@@ -4,10 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Linux-only display effect: the six logical tape colors never change. Only
- * the six colors available to future ant writes drift. Once a color is written
- * to the visual paper, that RGB value stays there until a later ant overwrites
- * the same cell. */
+/* Linux-only display effect: logical color zero is always true black. Colors
+ * 1..5 available to future ant writes drift slowly; once RGB is deposited on
+ * the visual paper, it stays there until that cell is overwritten. */
 #define PALETTE_DRIFT_SECONDS 240.0
 
 static uint32_t rgb_blend(uint32_t base, uint32_t tint, uint32_t amount)
@@ -54,8 +53,12 @@ static uint32_t palette_drift_tint(double universe_age)
 static void build_ink_palette(double universe_age, uint32_t out[TURMITE_COLORS])
 {
     const uint32_t tint = palette_drift_tint(universe_age);
-    for (size_t i = 0; i < TURMITE_COLORS; ++i) {
-        const uint32_t amount = (i < 2) ? 32u : 72u;
+
+    /* Color zero is the blank paper and the erasing color used by many rules,
+     * so keep it invariant. The remaining colors carry the time-varying ink. */
+    out[0] = TURMITE_DISPLAY_BASE_PALETTE[0];
+    for (size_t i = 1; i < TURMITE_COLORS; ++i) {
+        const uint32_t amount = (i == 1) ? 32u : 72u;
         out[i] = rgb_blend(TURMITE_DISPLAY_BASE_PALETTE[i], tint, amount);
     }
 }
