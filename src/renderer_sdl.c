@@ -13,6 +13,64 @@ static const uint32_t PALETTE[TURMITE_COLORS] = {
     0x4EA5D9u  /* blue */
 };
 
+/* Linux-only display effect: the six logical tape colors never change, but
+ * their rendered RGB values slowly drift through a shared tint. A full cycle
+ * takes several minutes so old/stable regions continue to evolve visually. */
+#define PALETTE_DRIFT_SECONDS 240.0
+
+static uint32_t rgb_blend(uint32_t base, uint32_t tint, uint32_t amount)
+{
+    const uint32_t inv = 255u - amount;
+    const uint32_t br = (base >> 16) & 0xffu;
+    const uint32_t bg = (base >> 8) & 0xffu;
+    const uint32_t bb = base & 0xffu;
+    const uint32_t tr = (tint >> 16) & 0xffu;
+    const uint32_t tg = (tint >> 8) & 0xffu;
+    const uint32_t tb = tint & 0xffu;
+
+    const uint32_t r = (br * inv + tr * amount) / 255u;
+    const uint32_t g = (bg * inv + tg * amount) / 255u;
+    const uint32_t b = (bb * inv + tb * amount) / 255u;
+    return (r << 16) | (g << 8) | b;
+}
+
+/* Six-segment RGB color wheel, implemented with integer interpolation so the
+ * renderer does not need libm just for a cosmetic animation. */
+static uint32_t palette_drift_tint(double universe_age)
+{
+    double cycle = universe_age / PALETTE_DRIFT_SECONDS;
+    cycle -= (uint64_t)cycle;
+
+    uint32_t phase = (uint32_t)(cycle * 1536.0); /* 6 * 256 */
+    if (phase >= 1536u) phase = 0;
+    const uint32_t segment = phase >> 8;
+    const uint32_t t = phase & 0xffu;
+    const uint32_t u = 255u - t;
+
+    uint32_t r = 0, g = 0, b = 0;
+    switch (segment) {
+        case 0: r = 255; g = t;   b = 0;   break; /* red -> yellow */
+        case 1: r = u;   g = 255; b = 0;   break; /* yellow -> green */
+        case 2: r = 0;   g = 255; b = t;   break; /* green -> cyan */
+        case 3: r = 0;   g = u;   b = 255; break; /* cyan -> blue */
+        case 4: r = t;   g = 0;   b = 255; break; /* blue -> magenta */
+        default:r = 255; g = 0;   b = u;   break; /* magenta -> red */
+    }
+    return (r << 16) | (g << 8) | b;
+}
+
+static void build_display_palette(double universe_age, uint32_t out[TURMITE_COLORS])
+{
+    const uint32_t tint = palette_drift_tint(universe_age);
+    for (size_t i = 0; i < TURMITE_COLORS; ++i) {
+        /* Neutrals get a restrained tint; chromatic entries can wander more.
+         * This keeps black/white patterns readable while ensuring they do not
+         * become visually static when the underlying tape stops changing. */
+        const uint32_t amount = (i < 2) ? 32u : 72u;
+        out[i] = rgb_blend(PALETTE[i], tint, amount);
+    }
+}
+
 /* Compact 5x7 font for the development HUD. Each row is 5 bits, MSB on the left. */
 typedef struct { char c; uint8_t rows[7]; } Glyph;
 
@@ -65,7 +123,7 @@ static const Glyph FONT[] = {
 static const Glyph *glyph(char c)
 {
     for (size_t i = 0; i < sizeof(FONT)/sizeof(FONT[0]); ++i) {
-        if (FONT[i].c == c) return &FONT[i];
+        if (FONT[i].c == c) return &FONT[0 + i];
     }
     return &FONT[0];
 }
@@ -180,10 +238,13 @@ void renderer_render(Renderer *renderer, const World *world, const AntColony *co
                      const Scheduler *scheduler, size_t workers, uint32_t seed, double universe_age,
                      uint64_t total_collisions, bool paused)
 {
+    uint32_t display_palette[TURMITE_COLORS];
+    build_display_palette(universe_age, display_palette);
+
     const int n = world->width * world->height;
     for (int i = 0; i < n; ++i) {
         uint8_t c = world_load(world, (size_t)i);
-        uint32_t rgb = PALETTE[c % TURMITE_COLORS];
+        uint32_t rgb = display_palette[c % TURMITE_COLORS];
         renderer->pixels[i] = 0xFF000000u | rgb;
     }
 
