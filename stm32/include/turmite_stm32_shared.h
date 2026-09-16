@@ -13,7 +13,7 @@
  * are used as striped locks around the shared occupancy byte array.
  */
 
-#define TURMITE_STM32_HSEM_STRIPES 32u
+#define TURMITE_STM32_HSEM_STRIPES 16u
 #define TURMITE_OCCUPANCY_EMPTY 0u
 
 /* One byte per world cell: 0 = empty, 1..32 = ant index + 1. */
