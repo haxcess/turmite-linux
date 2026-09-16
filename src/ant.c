@@ -78,12 +78,12 @@ static void reset_schedule(Ant *ant, uint32_t *state)
     atomic_store_explicit(&ant->weight, random_weight(state), memory_order_relaxed);
 }
 
-static uint8_t apply_turn(uint8_t heading, Turn turn)
+static uint8_t apply_turn(uint8_t heading, TurnCode turn)
 {
     switch (turn) {
         case TURN_L: return (heading + 3u) & 3u;
         case TURN_R: return (heading + 1u) & 3u;
-        case TURN_U: return (heading + 2u) & 3u;
+        case TURN_B: return (heading + 2u) & 3u;
         case TURN_N: return 0u;
         case TURN_E: return 1u;
         case TURN_S: return 2u;
