@@ -3,6 +3,11 @@
 #include <float.h>
 #include <time.h>
 
+/* Linux implementation of the scheduling policy. Token accrual determines
+ * when an ant may run; weighted fair credit determines which eligible ant gets
+ * the next worker lease. The mutex protects lease/credit decisions, while ant
+ * execution itself happens outside the lock. */
+
 static uint64_t monotonic_us(void)
 {
     struct timespec ts;
@@ -10,6 +15,8 @@ static uint64_t monotonic_us(void)
     return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
 }
 
+/* Lazily refill one ant's token bucket from elapsed wall time. Q16 arithmetic
+ * preserves sub-token accumulation while the bucket capacity bounds bursts. */
 static inline void accrue_tokens(Scheduler *scheduler, size_t index, Ant *ant, uint64_t now_us)
 {
     uint64_t last_us = scheduler->last_token_us[index];
@@ -44,6 +51,8 @@ static inline uint32_t flags_load(const Ant *ant)
     return atomic_load_explicit(&ant->flags, memory_order_acquire);
 }
 
+/* Halving is gradual: a draining ant stops earning tokens and retires only
+ * after its existing budget has been consumed. */
 static void retire_draining(Ant *ant, AntColony *colony)
 {
     uint32_t f = flags_load(ant);
@@ -67,6 +76,8 @@ static inline bool runnable(const Ant *ant)
     return (f & ANT_F_ENABLED) && !(f & (ANT_F_LEASED | ANT_F_CLOBBERED | ANT_F_EXPIRED | ANT_F_HALTED | ANT_F_DISPLACED));
 }
 
+/* Collision losers are dormant until their retained position becomes free.
+ * Reclaiming that cell is the gate that turns a clobber into a mutation. */
 static void reincarnate_clobbered(Scheduler *scheduler, Ant *ant, uint64_t now_us)
 {
     uint32_t f = flags_load(ant);
@@ -107,6 +118,9 @@ Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us, size_t *granted_qu
         Ant *best = NULL;
         double best_score = -DBL_MAX;
 
+        /* One WFQ-like scan updates each eligible ant's credit by its weight,
+         * then chooses the largest accumulated credit. Completed work is
+         * subtracted on release, so repeatedly served ants fall behind peers. */
         for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
             Ant *ant = &scheduler->colony->ants[i];
             uint32_t f = flags_load(ant);
@@ -157,6 +171,8 @@ Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us, size_t *granted_qu
             return best;
         }
 
+        /* Nothing has enough service budget. Sleep briefly instead of spinning;
+         * token accrual is derived from time, so no periodic tick is required. */
         atomic_fetch_add_explicit(&scheduler->empty_scans, 1u, memory_order_relaxed);
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -306,6 +322,8 @@ int scheduler_init(Scheduler *scheduler, AntColony *colony, SchedulerPolicy poli
         scheduler->last_token_us[i] = now_us;
     }
 
+    /* The condition variable uses CLOCK_MONOTONIC so wall-clock adjustments do
+     * not perturb token-service timing. */
     if (pthread_mutex_init(&scheduler->lock, NULL) != 0) return -1;
     pthread_condattr_t attr;
     if (pthread_condattr_init(&attr) != 0) {
@@ -341,6 +359,9 @@ int scheduler_double_population(Scheduler *scheduler, World *world, Lfsr32 *rng,
     if (target > TURMITE_MAX_ANTS) target = TURMITE_MAX_ANTS;
     size_t added = 0;
 
+    /* Fill free slots by cloning the healthiest currently idle ant. A clone
+     * inherits behavior/scheduling genes but receives a new random position and
+     * a full token bucket. */
     for (size_t slot = 0; slot < TURMITE_MAX_ANTS && current + added < target; ++slot) {
         Ant *dst = &scheduler->colony->ants[slot];
         if (flags_load(dst) & ANT_F_ENABLED) continue;
@@ -381,6 +402,8 @@ int scheduler_begin_halving(Scheduler *scheduler, size_t target_population)
         return 0;
     }
 
+    /* Resource pressure chooses the weakest available ants first. Setting their
+     * generation rate to zero lets remaining tokens drain before retirement. */
     size_t need = current - target_population;
     size_t marked = 0;
     while (marked < need) {
