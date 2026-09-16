@@ -57,7 +57,8 @@ Useful examples:
 - `+` or `=` double the population
 - `R` create a fresh universe (new seed)
 - `H` toggle the developer HUD
-- `ESC` quit
+- `Q` debug quit: stop the universe and write a headless paper-tape dump
+- `ESC` quit without a dump
 
 The scheduler policy is currently fixed to weighted-fair scheduling. Its selection is part of the universe configuration interface, but only WFQ is implemented in this first prototype.
 
@@ -68,3 +69,21 @@ The scheduler protects ant ownership and dispatch state. The world does not have
 Ant positions are atomic too, because workers may inspect them during collision detection. There is deliberately no occupancy map. Collision discovery is therefore a concurrent observation of the ant contexts and may be timing-sensitive.
 
 This is a reference experiment, not a deterministic cellular-automaton simulator. The same seed and configuration can still diverge because Linux scheduling and thread interleaving are outside the machine's control.
+
+## Debug dumps
+
+Press `Q` to stop the current universe and write a headless capture under `./turmite-dumps/` by default. The capture is a rolling history of whole-world pages plus ant/scheduler metadata; it does not use SDL to create the dump.
+
+The default is 127 retained pages, sampled once per second. Page counts are `1,3,7,15,31,63,127,255,511,1023` (2^n-1), so the ring-buffer indexing can use a power-of-two-sized storage calculation while retaining the requested page count. Configure this with:
+
+```sh
+./turmite --dump-pages 255 --dump-interval 0.5 --dump-dir ./captures
+```
+
+Each dump contains:
+
+- `manifest.txt`: seed, world dimensions, scheduler settings, per-page age/hash/change count, and per-ant state/rule/token metadata
+- `pages/page-NNNN.bin`: raw 8-bit color-index world pages, row-major, one byte per cell
+- `README.txt`: raw-page format notes
+
+`world_hash_hex` is FNV-1a over each raw page, and `changed_cells` compares a page with the preceding captured page. These are intended to make stagnant or cycling universes easy to spot without the SDL window.

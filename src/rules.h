@@ -40,6 +40,7 @@ typedef struct {
 size_t rules_count(void);
 const TurmiteRule *rules_get(size_t index);
 const TurmiteRule *rules_pick(size_t index);
+size_t rules_index_of(const TurmiteRule *rule);
 const char *turn_name(TurnCode turn);
 
 #endif

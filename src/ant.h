@@ -13,8 +13,8 @@
 #define TURMITE_MAX_ANTS 32
 
 typedef struct {
-    double token_rate;
-    double token_capacity;
+    _Atomic double token_rate;
+    _Atomic double token_capacity;
     _Atomic double tokens;
     _Atomic uint32_t weight;
     _Atomic double quantum_hint;
@@ -29,7 +29,8 @@ struct Ant {
     _Atomic int y;
     _Atomic uint8_t heading;
     _Atomic uint8_t state;
-    const TurmiteRule *rule;
+    _Atomic(const TurmiteRule *) rule;
+    _Atomic uint16_t rule_index;
 
     ScheduleParams sched;
 
@@ -53,6 +54,7 @@ void ant_colony_zero(AntColony *colony);
 void ant_randomize(Ant *ant, const World *world, Lfsr32 *rng, const TurmiteRule *rule, double now);
 void ant_clone(Ant *dst, const Ant *src, const World *world, Lfsr32 *rng, double now);
 void ant_mutate_in_place(Ant *ant, Lfsr32 *rng, double now);
+uint16_t ant_rule_index(const Ant *ant);
 
 /* Returns 1 when an instruction actually executed. */
 int ant_execute_one(Ant *ant, AntColony *colony, World *world, Lfsr32 *rng, double now);

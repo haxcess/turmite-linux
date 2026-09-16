@@ -11,6 +11,7 @@ SRC := \
   src/world.c \
   src/scheduler.c \
   src/ant.c \
+  src/dump.c \
   src/renderer_sdl.c
 
 OBJ := $(SRC:.c=.o)

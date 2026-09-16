@@ -34,6 +34,9 @@ A small embedded-oriented computational artwork in which logical turmites (ants)
 - The framebuffer is an observation window into the current world.
 - No e-ink behavior is simulated in the Linux concept.
 - A five-minute lifecycle is emulated by a timer; the final MCU should replace this with a genuine watchdog reset.
+- Pressing `Q` performs a debug quit and writes a headless rolling tape capture. The default is 127 pages sampled at 1 Hz. Accepted page counts are 1, 3, 7, 15, 31, 63, 127, 255, 511, and 1023.
+- Each captured page contains the six-color world plus a forensic metadata snapshot: world hash/change count, age, LFSR state, active population, quantum, dispatch count, collisions, total instructions, and per-ant position/rule/state/token/scheduler/health metadata.
+- Debug pages are SDL-independent raw byte images: one uint8 color index per world cell in row-major order.
 
 ## Intentionally unresolved for later experiments
 

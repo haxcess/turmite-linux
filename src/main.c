@@ -1,4 +1,5 @@
 #include "ant.h"
+#include "dump.h"
 #include "renderer.h"
 #include "rng.h"
 #include "rules.h"
@@ -25,6 +26,9 @@
 #define DEFAULT_MINUTES 5.0
 #define MIN_QUANTUM 1
 #define MAX_QUANTUM 4096
+#define DEFAULT_DUMP_PAGES 127
+#define DEFAULT_DUMP_INTERVAL 1.0
+#define MAX_DUMP_PAGES 1023
 
 static double mono_seconds(void)
 {
@@ -38,6 +42,7 @@ typedef struct {
     AntColony colony;
     Scheduler scheduler;
     Renderer renderer;
+    DumpCapture dump;
     Lfsr32 rng;
     uint32_t seed;
     int width;
@@ -47,9 +52,13 @@ typedef struct {
     size_t initial_ants;
     size_t quantum;
     double lifetime_minutes;
+    size_t dump_pages;
+    double dump_interval;
+    const char *dump_root;
     bool hud_visible;
-    bool quit;
+    _Atomic bool quit;
     bool restart;
+    bool debug_dump;
     bool paused;
     double started_at;
     pthread_t *threads;
@@ -66,7 +75,7 @@ static void *worker_main(void *arg)
     Universe *u = wa->u;
     (void)wa->worker_id;
 
-    while (!u->quit) {
+    while (!atomic_load_explicit(&u->quit, memory_order_acquire)) {
         double now = mono_seconds();
         Ant *ant = scheduler_acquire(&u->scheduler, now, &u->rng);
         if (!ant) break;
@@ -74,7 +83,7 @@ static void *worker_main(void *arg)
         size_t quantum = scheduler_get_quantum(&u->scheduler);
         size_t executed = 0;
 
-        for (; executed < quantum && !u->quit; ++executed) {
+        for (; executed < quantum && !atomic_load_explicit(&u->quit, memory_order_acquire); ++executed) {
             now = mono_seconds();
             int did = ant_execute_one(ant, &u->colony, &u->world, &u->rng, now);
 
@@ -133,6 +142,14 @@ static int universe_init(Universe *u, uint32_t seed)
         return -1;
     }
 
+    if (dump_capture_init(&u->dump, &u->world, u->seed, u->dump_pages,
+                          u->dump_interval, u->started_at) != 0) {
+        fprintf(stderr, "debug dump initialization failed\n");
+        scheduler_destroy(&u->scheduler);
+        world_destroy(&u->world);
+        return -1;
+    }
+
     u->hud_visible = true;
     if (renderer_init(&u->renderer, u->width, u->height, u->cell_size, u->hud_visible) != 0) {
         fprintf(stderr, "renderer initialization failed\n");
@@ -155,6 +172,7 @@ static int universe_init(Universe *u, uint32_t seed)
 static void universe_destroy(Universe *u)
 {
     free(u->threads);
+    dump_capture_destroy(&u->dump);
     renderer_destroy(&u->renderer);
     scheduler_destroy(&u->scheduler);
     world_destroy(&u->world);
@@ -167,7 +185,7 @@ static int universe_start_workers(Universe *u, WorkerArg *args)
         args[i].worker_id = i;
         if (pthread_create(&u->threads[i], NULL, worker_main, &args[i]) != 0) {
             fprintf(stderr, "pthread_create failed for worker %zu\n", i);
-            u->quit = true;
+            atomic_store_explicit(&u->quit, true, memory_order_release);
             scheduler_stop(&u->scheduler);
             for (size_t j = 0; j < i; ++j) pthread_join(u->threads[j], NULL);
             return -1;
@@ -213,6 +231,9 @@ static void usage(const char *prog)
     printf("  --width N            window width (multiple of 4)\n");
     printf("  --height N           window height (multiple of 4)\n");
     printf("  --minutes N          universe lifetime (default 5)\n");
+    printf("  --dump-pages N       retained debug pages: 1,3,7,...,1023 (default 127)\n");
+    printf("  --dump-interval N    seconds between retained pages (default 1)\n");
+    printf("  --dump-dir PATH      parent directory for debug dumps (default ./turmite-dumps)\n");
     printf("  --no-hud             hide developer HUD\n");
     printf("  --help               show this help\n");
 }
@@ -220,6 +241,11 @@ static void usage(const char *prog)
 static bool valid_population(size_t n)
 {
     return n == 2 || n == 4 || n == 8 || n == 16 || n == 32;
+}
+
+static bool valid_dump_pages(size_t n)
+{
+    return n >= 1 && n <= MAX_DUMP_PAGES && ((n + 1) & n) == 0;
 }
 
 static void choose_new_seed(Universe *u)
@@ -230,7 +256,13 @@ static void choose_new_seed(Universe *u)
 static void handle_key(Universe *u, SDL_Keycode key)
 {
     if (key == SDLK_ESCAPE) {
-        u->quit = true;
+        atomic_store_explicit(&u->quit, true, memory_order_release);
+        return;
+    }
+
+    if (key == SDLK_q) {
+        u->debug_dump = true;
+        atomic_store_explicit(&u->quit, true, memory_order_release);
         return;
     }
 
@@ -284,13 +316,16 @@ static bool run_universe(Universe *u)
     bool timed_out = false;
     if (universe_start_workers(u, args) != 0) return false;
 
+    dump_capture_reset(&u->dump, &u->world, u->seed, u->started_at);
+    dump_capture_now(&u->dump, &u->world, &u->colony, &u->scheduler, &u->rng, 0.0, mono_seconds());
+
     double next_frame = mono_seconds();
     const double frame_period = 1.0 / 60.0;
 
-    while (!u->quit && !u->restart) {
+    while (!atomic_load_explicit(&u->quit, memory_order_acquire) && !u->restart) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_QUIT) u->quit = true;
+            if (ev.type == SDL_QUIT) atomic_store_explicit(&u->quit, true, memory_order_release);
             else if (ev.type == SDL_KEYDOWN && !ev.key.repeat) handle_key(u, ev.key.keysym.sym);
         }
 
@@ -301,6 +336,8 @@ static bool run_universe(Universe *u)
             timed_out = true;
             break;
         }
+
+        dump_capture_maybe(&u->dump, &u->world, &u->colony, &u->scheduler, &u->rng, age, now);
 
         uint64_t collisions = atomic_load_explicit(&u->colony.collisions, memory_order_relaxed);
         renderer_render(&u->renderer, &u->world, &u->colony, &u->scheduler,
@@ -317,6 +354,15 @@ static bool run_universe(Universe *u)
     }
 
     universe_stop_workers(u, u->workers);
+
+    if (u->debug_dump) {
+        double final_age = mono_seconds() - u->started_at;
+        dump_capture_now(&u->dump, &u->world, &u->colony, &u->scheduler, &u->rng, final_age, mono_seconds());
+        (void)dump_write(&u->dump, &u->world, &u->colony, &u->scheduler,
+                         u->workers, scheduler_get_quantum(&u->scheduler),
+                         u->lifetime_minutes, u->dump_root);
+    }
+
     if (timed_out) u->restart = true;
 
     /* Give the final frame a moment on screen. */
@@ -326,7 +372,7 @@ static bool run_universe(Universe *u)
         while (SDL_GetTicks() - start < final_ms) {
             SDL_Event ev;
             while (SDL_PollEvent(&ev)) {
-                if (ev.type == SDL_QUIT) u->quit = true;
+                if (ev.type == SDL_QUIT) atomic_store_explicit(&u->quit, true, memory_order_release);
             }
             renderer_render(&u->renderer, &u->world, &u->colony, &u->scheduler,
                             u->workers, u->seed, mono_seconds() - u->started_at,
@@ -335,7 +381,7 @@ static bool run_universe(Universe *u)
         }
     }
 
-    return !u->quit && (u->restart || timed_out);
+    return !atomic_load_explicit(&u->quit, memory_order_acquire) && (u->restart || timed_out);
 }
 
 int main(int argc, char **argv)
@@ -346,6 +392,9 @@ int main(int argc, char **argv)
     size_t width = DEFAULT_WIDTH;
     size_t height = DEFAULT_HEIGHT;
     double minutes = DEFAULT_MINUTES;
+    size_t dump_pages = DEFAULT_DUMP_PAGES;
+    double dump_interval = DEFAULT_DUMP_INTERVAL;
+    const char *dump_root = dump_default_output_root();
     bool hud = true;
     uint32_t explicit_seed = 0;
     bool has_seed = false;
@@ -358,13 +407,16 @@ int main(int argc, char **argv)
         {"width", required_argument, NULL, 'x'},
         {"height", required_argument, NULL, 'y'},
         {"minutes", required_argument, NULL, 'm'},
+        {"dump-pages", required_argument, NULL, 'd'},
+        {"dump-interval", required_argument, NULL, 'i'},
+        {"dump-dir", required_argument, NULL, 'D'},
         {"no-hud", no_argument, NULL, 'n'},
         {"help", no_argument, NULL, 'h'},
         {NULL, 0, NULL, 0}
     };
 
     for (;;) {
-        int c = getopt_long(argc, argv, "s:a:q:w:x:y:m:nh", opts, NULL);
+        int c = getopt_long(argc, argv, "s:a:q:w:x:y:m:d:i:D:nh", opts, NULL);
         if (c == -1) break;
         switch (c) {
             case 's': if (!parse_seed(optarg, &explicit_seed)) { fprintf(stderr, "bad --seed\n"); return 2; } has_seed = true; break;
@@ -374,6 +426,9 @@ int main(int argc, char **argv)
             case 'x': if (!parse_uint(optarg, &width)) { fprintf(stderr, "bad --width\n"); return 2; } break;
             case 'y': if (!parse_uint(optarg, &height)) { fprintf(stderr, "bad --height\n"); return 2; } break;
             case 'm': minutes = strtod(optarg, NULL); if (minutes <= 0.0) { fprintf(stderr, "bad --minutes\n"); return 2; } break;
+            case 'd': if (!parse_uint(optarg, &dump_pages) || !valid_dump_pages(dump_pages)) { fprintf(stderr, "--dump-pages must be 1,3,7,...,1023\n"); return 2; } break;
+            case 'i': dump_interval = strtod(optarg, NULL); if (dump_interval <= 0.0) { fprintf(stderr, "bad --dump-interval\n"); return 2; } break;
+            case 'D': dump_root = optarg; break;
             case 'n': hud = false; break;
             case 'h': usage(argv[0]); return 0;
             default: usage(argv[0]); return 2;
@@ -395,6 +450,10 @@ int main(int argc, char **argv)
     u.initial_ants = ants;
     u.quantum = quantum;
     u.lifetime_minutes = minutes;
+    u.dump_pages = dump_pages;
+    u.dump_interval = dump_interval;
+    u.dump_root = dump_root;
+    atomic_init(&u.quit, false);
 
     if (universe_init(&u, has_seed ? explicit_seed : rng_entropy_seed()) != 0) return 1;
     u.renderer.hud_visible = hud;
@@ -406,8 +465,9 @@ int main(int argc, char **argv)
         if (!u.quit && restart) {
             choose_new_seed(&u);
             u.restart = false;
+            u.debug_dump = false;
             u.paused = false;
-            u.quit = false;
+            atomic_store_explicit(&u.quit, false, memory_order_release);
             universe_seed(&u);
             scheduler_destroy(&u.scheduler);
             if (scheduler_init(&u.scheduler, &u.colony, SCHED_WFQ, u.quantum) != 0) break;

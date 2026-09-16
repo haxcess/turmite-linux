@@ -37,8 +37,8 @@ static double random_capacity(Lfsr32 *rng)
 
 static void reset_schedule(Ant *ant, Lfsr32 *rng)
 {
-    ant->sched.token_rate = random_rate(rng);
-    ant->sched.token_capacity = random_capacity(rng);
+    atomic_store_explicit(&ant->sched.token_rate, random_rate(rng), memory_order_relaxed);
+    atomic_store_explicit(&ant->sched.token_capacity, random_capacity(rng), memory_order_relaxed);
     atomic_store_explicit(&ant->sched.tokens, 0.0, memory_order_relaxed);
     atomic_store_explicit(&ant->sched.weight, random_weight(rng), memory_order_relaxed);
     atomic_store_explicit(&ant->sched.quantum_hint, 1.0, memory_order_relaxed);
@@ -64,16 +64,18 @@ void ant_colony_zero(AntColony *colony)
         atomic_init(&colony->ants[i].draining, false);
         atomic_init(&colony->ants[i].instructions, 0);
         atomic_init(&colony->ants[i].mutations, 0);
-        colony->ants[i].rule = rules_get(0);
-        colony->ants[i].sched.token_rate = 1000.0;
-        colony->ants[i].sched.token_capacity = 64.0;
+        atomic_init(&colony->ants[i].rule, rules_get(0));
+        atomic_init(&colony->ants[i].rule_index, 0);
+        atomic_store_explicit(&colony->ants[i].sched.token_rate, 1000.0, memory_order_relaxed);
+        atomic_store_explicit(&colony->ants[i].sched.token_capacity, 64.0, memory_order_relaxed);
         colony->ants[i].last_token_time = 0.0;
     }
 }
 
 void ant_randomize(Ant *ant, const World *world, Lfsr32 *rng, const TurmiteRule *rule, double now)
 {
-    ant->rule = rule;
+    atomic_store_explicit(&ant->rule, rule, memory_order_release);
+    atomic_store_explicit(&ant->rule_index, (uint16_t)rules_index_of(rule), memory_order_release);
     atomic_store_explicit(&ant->x, (int)rng_uniform(rng, (uint32_t)world->width), memory_order_relaxed);
     atomic_store_explicit(&ant->y, (int)rng_uniform(rng, (uint32_t)world->height), memory_order_relaxed);
     atomic_store_explicit(&ant->heading, (uint8_t)rng_uniform(rng, 4u), memory_order_relaxed);
@@ -91,13 +93,16 @@ void ant_randomize(Ant *ant, const World *world, Lfsr32 *rng, const TurmiteRule 
 
 void ant_clone(Ant *dst, const Ant *src, const World *world, Lfsr32 *rng, double now)
 {
-    dst->rule = src->rule;
+    const TurmiteRule *src_rule = atomic_load_explicit(&src->rule, memory_order_acquire);
+    uint16_t src_rule_index = atomic_load_explicit(&src->rule_index, memory_order_acquire);
+    atomic_store_explicit(&dst->rule, src_rule, memory_order_release);
+    atomic_store_explicit(&dst->rule_index, src_rule_index, memory_order_release);
     atomic_store_explicit(&dst->x, (int)rng_uniform(rng, (uint32_t)world->width), memory_order_relaxed);
     atomic_store_explicit(&dst->y, (int)rng_uniform(rng, (uint32_t)world->height), memory_order_relaxed);
     atomic_store_explicit(&dst->heading, atomic_load_explicit(&src->heading, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->state, atomic_load_explicit(&src->state, memory_order_relaxed), memory_order_relaxed);
-    dst->sched.token_rate = src->sched.token_rate;
-    dst->sched.token_capacity = src->sched.token_capacity;
+    atomic_store_explicit(&dst->sched.token_rate, atomic_load_explicit(&src->sched.token_rate, memory_order_relaxed), memory_order_relaxed);
+    atomic_store_explicit(&dst->sched.token_capacity, atomic_load_explicit(&src->sched.token_capacity, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->sched.tokens, 0.0, memory_order_relaxed);
     atomic_store_explicit(&dst->sched.weight, atomic_load_explicit(&src->sched.weight, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->sched.quantum_hint, atomic_load_explicit(&src->sched.quantum_hint, memory_order_relaxed), memory_order_relaxed);
@@ -111,10 +116,16 @@ void ant_clone(Ant *dst, const Ant *src, const World *world, Lfsr32 *rng, double
     dst->last_token_time = now;
 }
 
+uint16_t ant_rule_index(const Ant *ant)
+{
+    return ant ? atomic_load_explicit(&ant->rule_index, memory_order_acquire) : 0;
+}
+
 void ant_mutate_in_place(Ant *ant, Lfsr32 *rng, double now)
 {
     const TurmiteRule *rule = rules_pick(rng_uniform(rng, (uint32_t)rules_count()));
-    ant->rule = rule;
+    atomic_store_explicit(&ant->rule, rule, memory_order_release);
+    atomic_store_explicit(&ant->rule_index, (uint16_t)rules_index_of(rule), memory_order_release);
     atomic_store_explicit(&ant->heading, (uint8_t)rng_uniform(rng, 4u), memory_order_relaxed);
     atomic_store_explicit(&ant->state, (uint8_t)rng_uniform(rng, rule->states), memory_order_relaxed);
     reset_schedule(ant, rng);
@@ -131,8 +142,10 @@ static void accrue_tokens(Ant *ant, double now)
     double elapsed = now - ant->last_token_time;
     if (elapsed <= 0.0) return;
     double tokens = atomic_load_explicit(&ant->sched.tokens, memory_order_relaxed);
-    tokens += ant->sched.token_rate * elapsed;
-    if (tokens > ant->sched.token_capacity) tokens = ant->sched.token_capacity;
+    double token_rate = atomic_load_explicit(&ant->sched.token_rate, memory_order_relaxed);
+    double token_capacity = atomic_load_explicit(&ant->sched.token_capacity, memory_order_relaxed);
+    tokens += token_rate * elapsed;
+    if (tokens > token_capacity) tokens = token_capacity;
     atomic_store_explicit(&ant->sched.tokens, tokens, memory_order_relaxed);
     ant->last_token_time = now;
 }
@@ -194,9 +207,10 @@ int ant_execute_one(Ant *ant, AntColony *colony, World *world, Lfsr32 *rng, doub
 
     size_t idx = world_index(world, x, y);
     uint8_t color = world_load(world, idx);
+    const TurmiteRule *rule = atomic_load_explicit(&ant->rule, memory_order_acquire);
     const RuleAction *action = NULL;
-    if (state < ant->rule->states && color < ant->rule->colors) {
-        action = &ant->rule->table[state][color];
+    if (rule && state < rule->states && color < rule->colors) {
+        action = &rule->table[state][color];
     }
     static const RuleAction fallback = { 0, TURN_F, 0, false };
     if (!action) action = &fallback;

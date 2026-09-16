@@ -43,14 +43,14 @@ static const TurmiteRule RULES[] = {
             { A(1,TURN_L,0), A(2,TURN_R,0), A(3,TURN_R,0), A(4,TURN_R,0), A(5,TURN_R,0), A(0,TURN_R,0) }
         }
     },
-    {
-        "busybeaver3", "Busy Beaver (3-state)", 3, 2,
-        {
-            { A(1,TURN_E,1), A(1,TURN_W,2) },
-            { A(1,TURN_W,0), A(1,TURN_E,1) },
-            { A(1,TURN_W,1), HLT(1,TURN_E,0) }
-        }
-    },
+    // {
+    //     "busybeaver3", "Busy Beaver (3-state)", 3, 2,
+    //     {
+    //         { A(1,TURN_E,1), A(1,TURN_W,2) },
+    //         { A(1,TURN_W,0), A(1,TURN_E,1) },
+    //         { A(1,TURN_W,1), HLT(1,TURN_E,0) }
+    //     }
+    // },
     {
         "builders", "Builders", 2, 2,
         {
@@ -168,3 +168,12 @@ const char *turn_name(TurnCode turn)
         default: return "?";
     }
 }
+size_t rules_index_of(const TurmiteRule *rule)
+{
+    if (!rule) return 0;
+    for (size_t i = 0; i < rules_count(); ++i) {
+        if (rules_get(i) == rule) return i;
+    }
+    return 0;
+}
+

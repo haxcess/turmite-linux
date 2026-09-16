@@ -9,8 +9,10 @@ static void accrue_tokens(Ant *ant, double now)
     if (elapsed <= 0.0) return;
 
     double tokens = atomic_load_explicit(&ant->sched.tokens, memory_order_relaxed);
-    tokens += ant->sched.token_rate * elapsed;
-    if (tokens > ant->sched.token_capacity) tokens = ant->sched.token_capacity;
+    double token_rate = atomic_load_explicit(&ant->sched.token_rate, memory_order_relaxed);
+    double token_capacity = atomic_load_explicit(&ant->sched.token_capacity, memory_order_relaxed);
+    tokens += token_rate * elapsed;
+    if (tokens > token_capacity) tokens = token_capacity;
     atomic_store_explicit(&ant->sched.tokens, tokens, memory_order_relaxed);
     ant->last_token_time = now;
 }
@@ -154,12 +156,22 @@ void scheduler_release(Scheduler *scheduler, Ant *ant, size_t executed, double n
     pthread_mutex_unlock(&scheduler->lock);
 }
 
+uint64_t scheduler_get_dispatches(const Scheduler *scheduler)
+{
+    return scheduler ? atomic_load_explicit(&scheduler->dispatches, memory_order_relaxed) : 0;
+}
+
 void scheduler_set_paused(Scheduler *scheduler, bool paused)
 {
     pthread_mutex_lock(&scheduler->lock);
     atomic_store_explicit(&scheduler->paused, paused, memory_order_release);
     pthread_cond_broadcast(&scheduler->work_available);
     pthread_mutex_unlock(&scheduler->lock);
+}
+
+bool scheduler_is_paused(const Scheduler *scheduler)
+{
+    return scheduler ? atomic_load_explicit(&scheduler->paused, memory_order_acquire) : false;
 }
 
 void scheduler_set_quantum(Scheduler *scheduler, size_t quantum)
@@ -269,7 +281,7 @@ int scheduler_begin_halving(Scheduler *scheduler, size_t target_population)
 
         if (!victim) break;
         atomic_store_explicit(&victim->draining, true, memory_order_release);
-        victim->sched.token_rate = 0.0;
+        atomic_store_explicit(&victim->sched.token_rate, 0.0, memory_order_relaxed);
         marked++;
     }
 
