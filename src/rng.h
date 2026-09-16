@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <stdatomic.h>
 
+/* Small deterministic PRNG used for universe setup and reproducibility. The
+ * atomic state lets setup/control paths share one generator safely; ants use
+ * their own non-atomic LFSR state while executing. */
 typedef struct {
     _Atomic uint32_t state;
 } Lfsr32;
