@@ -19,3 +19,14 @@
 4. Reduce scheduler shared-state traffic / full scans while preserving WFQ semantics.
 5. Separate single-worker throughput limits from two-worker coherency/lock contention.
 6. Revisit world-cell atomics only after collision and scheduler costs are reduced.
+
+
+### Completed in V5
+- Replace O(32) collision scan with O(1) CAS occupancy index.
+- Preserve authoritative ant position separately from the derived occupancy cache.
+- Add displaced-loser reclamation and smoke-test occupancy consistency.
+
+### Next
+1. Profile V5 saturated and normal token-rate runs against the V4 baseline.
+2. If scheduler dominates normal-rate runs, prototype minimum-service batching without changing long-term token rates.
+3. Revisit world-cell atomic/interpreter costs only after the above.

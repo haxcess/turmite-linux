@@ -50,6 +50,7 @@ static void retire_draining(Ant *ant, AntColony *colony)
             atomic_fetch_and_explicit(&ant->flags, ~(uint32_t)ANT_F_ENABLED, memory_order_acq_rel);
             atomic_fetch_and_explicit(&ant->flags, ~(uint32_t)ANT_F_DRAINING, memory_order_acq_rel);
             const size_t index = (size_t)(ant - colony->ants);
+            ant_release_occupancy(ant, colony);
             atomic_fetch_and_explicit(&colony->enabled_mask, ~(UINT32_C(1) << index), memory_order_release);
             atomic_fetch_sub_explicit(&colony->active_population, 1u, memory_order_relaxed);
         }
@@ -59,21 +60,29 @@ static void retire_draining(Ant *ant, AntColony *colony)
 static inline bool runnable(const Ant *ant)
 {
     uint32_t f = flags_load(ant);
-    return (f & ANT_F_ENABLED) && !(f & (ANT_F_LEASED | ANT_F_CLOBBERED | ANT_F_EXPIRED | ANT_F_HALTED));
+    return (f & ANT_F_ENABLED) && !(f & (ANT_F_LEASED | ANT_F_CLOBBERED | ANT_F_EXPIRED | ANT_F_HALTED | ANT_F_DISPLACED));
 }
 
 static void reincarnate_clobbered(Scheduler *scheduler, Ant *ant, uint64_t now_us)
 {
     uint32_t f = flags_load(ant);
-    if ((f & (ANT_F_CLOBBERED | ANT_F_LEASED)) != ANT_F_CLOBBERED) return;
+    if (!(f & ANT_F_CLOBBERED) || (f & ANT_F_LEASED)) return;
+
+    /* The loser stays at its recorded position but is not a resident read-head
+     * until the winner leaves. This provides the intended escape time. */
+    if (!ant_try_reclaim_position(ant, scheduler->colony)) return;
+
     uint32_t expected = f;
-    uint32_t desired = (f & ~ANT_F_CLOBBERED) | ANT_F_ENABLED;
+    uint32_t desired = (f & ~(uint32_t)(ANT_F_CLOBBERED | ANT_F_DISPLACED)) | ANT_F_ENABLED;
     if (atomic_compare_exchange_strong_explicit(&ant->flags, &expected, desired,
                                                  memory_order_acq_rel, memory_order_relaxed)) {
         ant_mutate_in_place(ant);
         size_t idx = (size_t)(ant - scheduler->colony->ants);
         scheduler->last_token_us[idx] = now_us;
         atomic_fetch_add_explicit(&scheduler->colony->stats[idx].mutations, 1u, memory_order_relaxed);
+    } else {
+        /* If another state transition won the race, don't leave a stale claim. */
+        ant_release_occupancy(ant, scheduler->colony);
     }
 }
 
@@ -97,7 +106,7 @@ Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us, size_t *granted_qu
         for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
             Ant *ant = &scheduler->colony->ants[i];
             uint32_t f = flags_load(ant);
-            if (!(f & ANT_F_ENABLED) || (f & (ANT_F_LEASED | ANT_F_CLOBBERED | ANT_F_EXPIRED))) continue;
+            if (!(f & ANT_F_ENABLED) || (f & (ANT_F_LEASED | ANT_F_CLOBBERED | ANT_F_EXPIRED | ANT_F_DISPLACED))) continue;
 
             accrue_tokens(scheduler, i, ant, now_us);
             retire_draining(ant, scheduler->colony);

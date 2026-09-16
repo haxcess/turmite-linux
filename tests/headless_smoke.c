@@ -49,7 +49,7 @@ int main(void)
     Worker worker;
 
     if (world_init(&world, 300, 200) != 0) return 1;
-    ant_colony_zero(&colony);
+    if (ant_colony_init(&colony, &world) != 0) return 1;
     rng_seed(&rng, UINT32_C(0x12345678));
     for (size_t i = 0; i < 8; ++i) {
         ant_randomize(&colony.ants[i], &colony, &world, &rng, rules_get(i % rules_count()));
@@ -72,10 +72,39 @@ int main(void)
     pthread_join(t0, NULL);
     pthread_join(t1, NULL);
 
+    /* Validate the derived occupancy index after concurrent execution. Each
+     * resident id may appear at most once and must agree with its published
+     * authoritative position. Displaced/clobbered ants are allowed no slot. */
+    bool seen[TURMITE_MAX_ANTS] = { false };
+    for (size_t cell = 0; cell < colony.occupancy_cells; ++cell) {
+        uint8_t owner = atomic_load_explicit(&colony.occupancy[cell], memory_order_relaxed);
+        if (!owner) continue;
+        if (owner > TURMITE_MAX_ANTS || seen[owner - 1u]) {
+            fprintf(stderr, "smoke failed: invalid/duplicate occupancy owner %u\n", owner);
+            scheduler_destroy(&scheduler);
+            ant_colony_destroy(&colony);
+            world_destroy(&world);
+            return 4;
+        }
+        seen[owner - 1u] = true;
+        const uint32_t p = ant_packed_position(&colony, owner - 1u);
+        const uint32_t x = p & UINT32_C(0xffff);
+        const uint32_t y = p >> 16;
+        const size_t expected_cell = (size_t)y * (size_t)world.width + (size_t)x;
+        if (expected_cell != cell) {
+            fprintf(stderr, "smoke failed: stale occupancy owner %u\n", owner);
+            scheduler_destroy(&scheduler);
+            ant_colony_destroy(&colony);
+            world_destroy(&world);
+            return 5;
+        }
+    }
+
     size_t population = atomic_load(&colony.active_population);
     if (population != 8) {
         fprintf(stderr, "smoke failed: population changed unexpectedly: %zu\n", population);
         scheduler_destroy(&scheduler);
+        ant_colony_destroy(&colony);
         world_destroy(&world);
         return 3;
     }
@@ -85,6 +114,7 @@ int main(void)
            population);
 
     scheduler_destroy(&scheduler);
+    ant_colony_destroy(&colony);
     world_destroy(&world);
     return 0;
 }

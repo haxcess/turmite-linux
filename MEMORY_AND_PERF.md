@@ -49,3 +49,7 @@ Examples:
     make perf-record-saturated
 
 The saturated targets use one worker and 16x token generation. Compare them with the normal one-worker profile before changing production token rates.
+
+
+## V5 occupancy memory
+The collision index uses one atomic byte per world cell. At the default 300x200 logical world this is 60 KB, in exchange for O(1) collision lookup. `sizeof(Ant)` remains 40 bytes; the occupancy storage is dynamically allocated and therefore not included in `sizeof(AntColony)`.

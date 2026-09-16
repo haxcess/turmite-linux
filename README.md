@@ -147,3 +147,15 @@ The benchmark accepts optional worker-count and token-rate-scale parameters:
 ```
 
 Use the saturated run only to isolate scheduler cost; normal universe behavior still uses the original randomized per-ant token rates.
+
+## V5 collision index
+
+V5 replaces the O(32) read-head collision scan with a derived O(1) occupancy index. The six-color tape is unchanged. Ant position remains authoritative; the occupancy table is one atomic byte per logical world cell and stores only the current resident ant id.
+
+A collision loser is marked displaced and clobbered. It retains its published position but cannot reincarnate until that position can be reclaimed after the winner leaves. This gives the winner escape time while preserving one resident read-head per cell.
+
+Use the existing profiling targets to compare against V4:
+
+    make perf-record-1w
+    make perf-record-saturated
+

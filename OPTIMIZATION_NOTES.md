@@ -47,3 +47,12 @@ The baseline perf profile showed collision detection walking full `Ant` structur
 A profile-only scheduler token-rate multiplier was added to distinguish token fragmentation from scheduler implementation cost. It applies during token accrual, so clobber/mutation cannot silently reset the experiment.
 
 Local results (environment-dependent) showed normal rates producing only a few instructions per successful dispatch, with zero empty scans. At 16x token rate, grants approached the requested 256-instruction quantum. This means the next scheduler optimization should consider batching/minimum service quanta or another WFQ-friendly mechanism rather than assuming the 1 ms timed wait is the dominant cost.
+
+
+## V5: O(1) read-head occupancy index
+
+The O(32) packed-position collision scan has been replaced by a world-sized, derived occupancy index. Each entry is one atomic byte: 0 = empty, 1..32 = ant id + 1. Ant positions remain authoritative; occupancy is only an acceleration structure.
+
+Moves clear the source with a conditional CAS and claim the destination with CAS. Contention directly identifies the resident ant in O(1), after which token health decides the winner. The loser is marked CLOBBERED|DISPLACED and cannot reincarnate until it atomically reclaims its recorded position after the winner leaves. This preserves the read-head exclusivity/escape-time model without scanning the colony.
+
+For a 300x200 world the occupancy index costs 60,000 bytes. The six-color tape remains independent relaxed atomic memory.

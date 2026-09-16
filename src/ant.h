@@ -25,7 +25,8 @@ enum {
     ANT_F_CLOBBERED = 1u << 2,
     ANT_F_EXPIRED   = 1u << 3,
     ANT_F_DRAINING  = 1u << 4,
-    ANT_F_HALTED    = 1u << 5
+    ANT_F_HALTED    = 1u << 5,
+    ANT_F_DISPLACED = 1u << 6
 };
 
 typedef struct Ant Ant;
@@ -66,11 +67,19 @@ struct AntColony {
     alignas(64) _Atomic uint32_t positions[TURMITE_MAX_ANTS];
     _Atomic uint32_t enabled_mask;
 
+    /* Derived O(1) read-head index. 0 means empty; 1..32 are ant index + 1.
+     * This is an acceleration structure, not part of the six-color tape. */
+    _Atomic uint8_t *occupancy;
+    size_t occupancy_cells;
+    uint32_t occupancy_width;
+
     _Atomic size_t active_population;
     _Atomic uint64_t collisions;
 };
 
-void ant_colony_zero(AntColony *colony);
+int ant_colony_init(AntColony *colony, const World *world);
+void ant_colony_reset(AntColony *colony);
+void ant_colony_destroy(AntColony *colony);
 void ant_randomize(Ant *ant, AntColony *colony, const World *world, Lfsr32 *rng, const TurmiteRule *rule);
 void ant_clone(Ant *dst, AntColony *colony, const Ant *src, const World *world, Lfsr32 *rng);
 void ant_mutate_in_place(Ant *ant);
@@ -78,6 +87,9 @@ uint16_t ant_rule_index(const Ant *ant);
 uint32_t ant_packed_position(const AntColony *colony, size_t ant_index);
 uint32_t ant_position_x(const AntColony *colony, size_t ant_index);
 uint32_t ant_position_y(const AntColony *colony, size_t ant_index);
+uint8_t ant_occupant_at(const AntColony *colony, uint32_t x, uint32_t y);
+bool ant_try_reclaim_position(Ant *ant, AntColony *colony);
+void ant_release_occupancy(Ant *ant, AntColony *colony);
 
 /* Execute up to quantum instructions. Returns the number actually executed. */
 size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t quantum);

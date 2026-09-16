@@ -34,7 +34,8 @@ int main(int argc, char **argv) {
     if (!(ants == 2 || ants == 4 || ants == 8 || ants == 16 || ants == 32) || quantum == 0 || seconds <= 0 || workers == 0 || workers > BENCH_MAX_WORKERS || rate_scale == 0) return 2;
     World world; AntColony colony; Scheduler scheduler; Lfsr32 rng;
     if (world_init(&world, 300, 200) != 0) return 1;
-    ant_colony_zero(&colony); rng_seed(&rng, UINT32_C(0x12345678));
+    if (ant_colony_init(&colony, &world) != 0) return 1;
+    rng_seed(&rng, UINT32_C(0x12345678));
     for (size_t i = 0; i < ants; ++i) {
         ant_randomize(&colony.ants[i], &colony, &world, &rng, rules_get(i % rules_count()));
     }
@@ -59,5 +60,5 @@ int main(int argc, char **argv) {
            dispatches ? (double)granted / (double)dispatches : 0.0,
            (unsigned long long)empty_scans, (unsigned long long)idle_waits,
            (unsigned long long)atomic_load(&colony.collisions), atomic_load(&colony.active_population));
-    scheduler_destroy(&scheduler); world_destroy(&world); return 0;
+    scheduler_destroy(&scheduler); ant_colony_destroy(&colony); world_destroy(&world); return 0;
 }

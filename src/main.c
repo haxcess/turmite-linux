@@ -99,7 +99,7 @@ static void *worker_main(void *arg)
 static void universe_seed(Universe *u)
 {
     world_clear(&u->world);
-    ant_colony_zero(&u->colony);
+    ant_colony_reset(&u->colony);
     rng_seed(&u->rng, u->seed);
 
     double now = mono_seconds();
@@ -121,11 +121,17 @@ static int universe_init(Universe *u, uint32_t seed)
         fprintf(stderr, "world allocation failed\n");
         return -1;
     }
+    if (ant_colony_init(&u->colony, &u->world) != 0) {
+        fprintf(stderr, "occupancy allocation failed\n");
+        world_destroy(&u->world);
+        return -1;
+    }
 
     universe_seed(u);
 
     if (scheduler_init(&u->scheduler, &u->colony, SCHED_WFQ, u->quantum) != 0) {
         fprintf(stderr, "scheduler initialization failed\n");
+        ant_colony_destroy(&u->colony);
         world_destroy(&u->world);
         return -1;
     }
@@ -134,6 +140,7 @@ static int universe_init(Universe *u, uint32_t seed)
                           u->dump_interval, u->started_at) != 0) {
         fprintf(stderr, "debug dump initialization failed\n");
         scheduler_destroy(&u->scheduler);
+        ant_colony_destroy(&u->colony);
         world_destroy(&u->world);
         return -1;
     }
@@ -143,6 +150,7 @@ static int universe_init(Universe *u, uint32_t seed)
         if (renderer_init(&u->renderer, u->width, u->height, u->cell_size, u->hud_visible) != 0) {
             fprintf(stderr, "renderer initialization failed\n");
             scheduler_destroy(&u->scheduler);
+            ant_colony_destroy(&u->colony);
             world_destroy(&u->world);
             return -1;
         }
@@ -152,6 +160,7 @@ static int universe_init(Universe *u, uint32_t seed)
     if (!u->threads) {
         if (!u->headless) renderer_destroy(&u->renderer);
         scheduler_destroy(&u->scheduler);
+        ant_colony_destroy(&u->colony);
         world_destroy(&u->world);
         return -1;
     }
@@ -165,6 +174,7 @@ static void universe_destroy(Universe *u)
     dump_capture_destroy(&u->dump);
     if (!u->headless) renderer_destroy(&u->renderer);
     scheduler_destroy(&u->scheduler);
+    ant_colony_destroy(&u->colony);
     world_destroy(&u->world);
 }
 
