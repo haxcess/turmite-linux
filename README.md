@@ -87,3 +87,31 @@ Each dump contains:
 - `README.txt`: raw-page format notes
 
 `world_hash_hex` is FNV-1a over each raw page, and `changed_cells` compares a page with the preceding captured page. These are intended to make stagnant or cycling universes easy to spot without the SDL window.
+
+## Headless / performance work
+
+The reference prototype can now run without opening an SDL window:
+
+```bash
+./turmite --headless --ants 32 --quantum 64 --dump-pages 127
+```
+
+Type `Q` followed by Enter to stop and write the rolling debug dump. The headless control thread sleeps while the worker threads burn through the universe.
+
+The first optimization pass also reduces the hot-path cost and ant footprint: Q16 token accounting replaces per-instruction floating-point accumulation, runtime RNG becomes per-ant, scheduler quantum is lock-free to read, and ant execution keeps x/y local between world moves. The world remains one atomic byte per cell because byte-level atomic last-write-wins semantics are part of the experiment.
+
+Useful validation targets:
+
+```bash
+make core-test
+make tsan-test
+make struct-report
+```
+
+For Linux CPU profiling:
+
+```bash
+perf stat -d ./turmite --headless --ants 32 --quantum 64 --minutes 0.25 --dump-pages 1
+perf record -g ./turmite --headless --ants 32 --quantum 64 --minutes 0.25 --dump-pages 1
+perf report
+```

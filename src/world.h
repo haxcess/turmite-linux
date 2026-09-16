@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stdatomic.h>
 
-#include "rules.h"
+#define TURMITE_COLORS 6
 
 typedef struct {
     int width;

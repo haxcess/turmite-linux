@@ -16,6 +16,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <poll.h>
 
 #define DEFAULT_WIDTH 1200
 #define DEFAULT_HEIGHT 800
@@ -35,6 +36,13 @@ static double mono_seconds(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+static uint64_t mono_microseconds(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
 }
 
 typedef struct {
@@ -60,6 +68,8 @@ typedef struct {
     bool restart;
     bool debug_dump;
     bool paused;
+    bool headless;
+    bool stdin_eof;
     double started_at;
     pthread_t *threads;
 } Universe;
@@ -73,35 +83,14 @@ static void *worker_main(void *arg)
 {
     WorkerArg *wa = arg;
     Universe *u = wa->u;
-    (void)wa->worker_id;
 
     while (!atomic_load_explicit(&u->quit, memory_order_acquire)) {
-        double now = mono_seconds();
-        Ant *ant = scheduler_acquire(&u->scheduler, now, &u->rng);
+        Ant *ant = scheduler_acquire(&u->scheduler, mono_microseconds());
         if (!ant) break;
 
         size_t quantum = scheduler_get_quantum(&u->scheduler);
-        size_t executed = 0;
-
-        for (; executed < quantum && !atomic_load_explicit(&u->quit, memory_order_acquire); ++executed) {
-            now = mono_seconds();
-            int did = ant_execute_one(ant, &u->colony, &u->world, &u->rng, now);
-
-            if (atomic_load_explicit(&ant->clobbered, memory_order_acquire)) {
-                bool expected = true;
-                if (atomic_compare_exchange_strong_explicit(
-                        &ant->clobbered, &expected, false,
-                        memory_order_acq_rel, memory_order_relaxed)) {
-                    ant_mutate_in_place(ant, &u->rng, now);
-                }
-                break;
-            }
-
-            if (did == 0) break;
-            if (!atomic_load_explicit(&ant->enabled, memory_order_acquire)) break;
-        }
-
-        scheduler_release(&u->scheduler, ant, executed, mono_seconds());
+        size_t executed = ant_execute_quantum(ant, &u->colony, &u->world, quantum);
+        scheduler_release(&u->scheduler, ant, executed, mono_microseconds());
     }
 
     return NULL;
@@ -151,16 +140,18 @@ static int universe_init(Universe *u, uint32_t seed)
     }
 
     u->hud_visible = true;
-    if (renderer_init(&u->renderer, u->width, u->height, u->cell_size, u->hud_visible) != 0) {
-        fprintf(stderr, "renderer initialization failed\n");
-        scheduler_destroy(&u->scheduler);
-        world_destroy(&u->world);
-        return -1;
+    if (!u->headless) {
+        if (renderer_init(&u->renderer, u->width, u->height, u->cell_size, u->hud_visible) != 0) {
+            fprintf(stderr, "renderer initialization failed\n");
+            scheduler_destroy(&u->scheduler);
+            world_destroy(&u->world);
+            return -1;
+        }
     }
 
     u->threads = calloc(u->workers, sizeof(*u->threads));
     if (!u->threads) {
-        renderer_destroy(&u->renderer);
+        if (!u->headless) renderer_destroy(&u->renderer);
         scheduler_destroy(&u->scheduler);
         world_destroy(&u->world);
         return -1;
@@ -173,7 +164,7 @@ static void universe_destroy(Universe *u)
 {
     free(u->threads);
     dump_capture_destroy(&u->dump);
-    renderer_destroy(&u->renderer);
+    if (!u->headless) renderer_destroy(&u->renderer);
     scheduler_destroy(&u->scheduler);
     world_destroy(&u->world);
 }
@@ -235,6 +226,7 @@ static void usage(const char *prog)
     printf("  --dump-interval N    seconds between retained pages (default 1)\n");
     printf("  --dump-dir PATH      parent directory for debug dumps (default ./turmite-dumps)\n");
     printf("  --no-hud             hide developer HUD\n");
+    printf("  --headless           run without SDL; type Q then Enter to debug-quit\n");
     printf("  --help               show this help\n");
 }
 
@@ -310,6 +302,31 @@ static void handle_key(Universe *u, SDL_Keycode key)
     }
 }
 
+static void headless_poll_input(Universe *u)
+{
+    if (!u->headless || u->stdin_eof) return;
+
+    struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
+    int rc = poll(&pfd, 1, 0);
+    if (rc <= 0 || !(pfd.revents & (POLLIN | POLLHUP))) return;
+
+    char buf[64];
+    ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
+    if (n == 0) {
+        u->stdin_eof = true;
+        return;
+    }
+    if (n < 0) return;
+
+    for (ssize_t i = 0; i < n; ++i) {
+        if (buf[i] == 'q' || buf[i] == 'Q') {
+            u->debug_dump = true;
+            atomic_store_explicit(&u->quit, true, memory_order_release);
+            return;
+        }
+    }
+}
+
 static bool run_universe(Universe *u)
 {
     WorkerArg args[8];
@@ -323,33 +340,42 @@ static bool run_universe(Universe *u)
     const double frame_period = 1.0 / 60.0;
 
     while (!atomic_load_explicit(&u->quit, memory_order_acquire) && !u->restart) {
-        SDL_Event ev;
-        while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_QUIT) atomic_store_explicit(&u->quit, true, memory_order_release);
-            else if (ev.type == SDL_KEYDOWN && !ev.key.repeat) handle_key(u, ev.key.keysym.sym);
+        if (!u->headless) {
+            SDL_Event ev;
+            while (SDL_PollEvent(&ev)) {
+                if (ev.type == SDL_QUIT) atomic_store_explicit(&u->quit, true, memory_order_release);
+                else if (ev.type == SDL_KEYDOWN && !ev.key.repeat) handle_key(u, ev.key.keysym.sym);
+            }
+        } else {
+            headless_poll_input(u);
         }
 
         double now = mono_seconds();
         double age = now - u->started_at;
         if (age >= u->lifetime_minutes * 60.0) {
-            /* Prototype watchdog sequence: stop computation, leave the final graphic visible briefly. */
             timed_out = true;
             break;
         }
 
         dump_capture_maybe(&u->dump, &u->world, &u->colony, &u->scheduler, &u->rng, age, now);
 
-        uint64_t collisions = atomic_load_explicit(&u->colony.collisions, memory_order_relaxed);
-        renderer_render(&u->renderer, &u->world, &u->colony, &u->scheduler,
-                        u->workers, u->seed, age, collisions, u->paused);
+        if (!u->headless) {
+            uint64_t collisions = atomic_load_explicit(&u->colony.collisions, memory_order_relaxed);
+            renderer_render(&u->renderer, &u->world, &u->colony, &u->scheduler,
+                            u->workers, u->seed, age, collisions, u->paused);
 
-        next_frame += frame_period;
-        double sleep_for = next_frame - mono_seconds();
-        if (sleep_for > 0.0) {
-            Uint32 ms = (Uint32)(sleep_for * 1000.0);
-            if (ms > 0) SDL_Delay(ms);
+            next_frame += frame_period;
+            double sleep_for = next_frame - mono_seconds();
+            if (sleep_for > 0.0) {
+                Uint32 ms = (Uint32)(sleep_for * 1000.0);
+                if (ms > 0) SDL_Delay(ms);
+            } else {
+                next_frame = mono_seconds();
+            }
         } else {
-            next_frame = mono_seconds();
+            /* Keep the control/dump thread cool while workers burn the universe. */
+            struct timespec ts = { .tv_sec = 0, .tv_nsec = 10000000L };
+            nanosleep(&ts, NULL);
         }
     }
 
@@ -365,8 +391,7 @@ static bool run_universe(Universe *u)
 
     if (timed_out) u->restart = true;
 
-    /* Give the final frame a moment on screen. */
-    if (u->restart || u->quit || timed_out) {
+    if (!u->headless && (u->restart || u->quit || timed_out)) {
         const Uint32 final_ms = 400;
         Uint32 start = SDL_GetTicks();
         while (SDL_GetTicks() - start < final_ms) {
@@ -398,6 +423,7 @@ int main(int argc, char **argv)
     bool hud = true;
     uint32_t explicit_seed = 0;
     bool has_seed = false;
+    bool headless = false;
 
     static const struct option opts[] = {
         {"seed", required_argument, NULL, 's'},
@@ -411,12 +437,13 @@ int main(int argc, char **argv)
         {"dump-interval", required_argument, NULL, 'i'},
         {"dump-dir", required_argument, NULL, 'D'},
         {"no-hud", no_argument, NULL, 'n'},
+        {"headless", no_argument, NULL, 'H'},
         {"help", no_argument, NULL, 'h'},
         {NULL, 0, NULL, 0}
     };
 
     for (;;) {
-        int c = getopt_long(argc, argv, "s:a:q:w:x:y:m:d:i:D:nh", opts, NULL);
+        int c = getopt_long(argc, argv, "s:a:q:w:x:y:m:d:i:D:nHh", opts, NULL);
         if (c == -1) break;
         switch (c) {
             case 's': if (!parse_seed(optarg, &explicit_seed)) { fprintf(stderr, "bad --seed\n"); return 2; } has_seed = true; break;
@@ -430,6 +457,7 @@ int main(int argc, char **argv)
             case 'i': dump_interval = strtod(optarg, NULL); if (dump_interval <= 0.0) { fprintf(stderr, "bad --dump-interval\n"); return 2; } break;
             case 'D': dump_root = optarg; break;
             case 'n': hud = false; break;
+            case 'H': headless = true; break;
             case 'h': usage(argv[0]); return 0;
             default: usage(argv[0]); return 2;
         }
@@ -453,6 +481,8 @@ int main(int argc, char **argv)
     u.dump_pages = dump_pages;
     u.dump_interval = dump_interval;
     u.dump_root = dump_root;
+    u.headless = headless;
+    u.stdin_eof = false;
     atomic_init(&u.quit, false);
 
     if (universe_init(&u, has_seed ? explicit_seed : rng_entropy_seed()) != 0) return 1;
