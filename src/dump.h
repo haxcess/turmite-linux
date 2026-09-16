@@ -9,6 +9,8 @@
 #include "scheduler.h"
 #include "world.h"
 
+/* Debug capture is a rolling ring of complete logical tape snapshots plus the
+ * scheduler/ant metadata needed to explain what changed between snapshots. */
 typedef struct {
     double age;
     uint64_t collisions;
@@ -43,6 +45,8 @@ typedef struct {
 } DumpAntMeta;
 
 typedef struct {
+    /* world_pages is page_capacity contiguous full-world byte images. Metadata
+     * arrays use the same ring slot so one index identifies a complete sample. */
     uint8_t *world_pages;
     DumpPageMeta *page_meta;
     DumpAntMeta *ant_meta;
