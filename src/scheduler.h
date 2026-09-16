@@ -29,6 +29,7 @@ typedef struct {
     _Atomic size_t quantum;
     _Atomic size_t min_service;
     _Atomic uint32_t token_rate_scale;
+    _Atomic uint32_t token_rate_divisor;
 } Scheduler;
 
 int scheduler_init(Scheduler *scheduler, AntColony *colony, SchedulerPolicy policy, size_t quantum);
@@ -38,6 +39,8 @@ void scheduler_release(Scheduler *scheduler, Ant *ant, size_t executed, uint64_t
 void scheduler_set_quantum(Scheduler *scheduler, size_t quantum);
 void scheduler_set_min_service(Scheduler *scheduler, size_t min_service);
 void scheduler_set_token_rate_scale(Scheduler *scheduler, uint32_t scale);
+void scheduler_set_token_rate_divisor(Scheduler *scheduler, uint32_t divisor);
+uint32_t scheduler_get_token_rate_divisor(const Scheduler *scheduler);
 size_t scheduler_get_quantum(const Scheduler *scheduler);
 size_t scheduler_get_min_service(const Scheduler *scheduler);
 uint64_t scheduler_get_dispatches(const Scheduler *scheduler);
