@@ -25,6 +25,7 @@
 #define DEFAULT_ANTS 8
 #define DEFAULT_QUANTUM 32
 #define DEFAULT_MIN_SERVICE 16
+#define DEFAULT_TOKEN_RATE_DIVISOR 1
 #define DEFAULT_MINUTES 5.0
 #define MIN_QUANTUM 1
 #define MAX_QUANTUM 4096
@@ -61,6 +62,7 @@ typedef struct {
     size_t initial_ants;
     size_t quantum;
     size_t min_service;
+    uint32_t token_rate_divisor;
     double lifetime_minutes;
     size_t dump_pages;
     double dump_interval;
@@ -81,6 +83,9 @@ typedef struct {
     size_t worker_id;
 } WorkerArg;
 
+/* Worker threads are intentionally thin: acquire one logical ant, execute its
+ * granted burst, then return accounting to the scheduler. The same shape maps
+ * naturally onto RTOS worker tasks later. */
 static void *worker_main(void *arg)
 {
     WorkerArg *wa = arg;
@@ -98,6 +103,8 @@ static void *worker_main(void *arg)
     return NULL;
 }
 
+/* Reset the shared tape and ant population for a fresh universe while keeping
+ * the process-level configuration (window, workers, scheduler tuning) intact. */
 static void universe_seed(Universe *u)
 {
     world_clear(&u->world);
@@ -114,6 +121,8 @@ static void universe_seed(Universe *u)
     u->started_at = now;
 }
 
+/* Allocate the major subsystems in dependency order. The world comes first,
+ * then ant occupancy/scheduler state, debug capture, and finally the renderer. */
 static int universe_init(Universe *u, uint32_t seed)
 {
     u->seed = seed;
@@ -138,6 +147,7 @@ static int universe_init(Universe *u, uint32_t seed)
         return -1;
     }
     scheduler_set_min_service(&u->scheduler, u->min_service);
+    scheduler_set_token_rate_divisor(&u->scheduler, u->token_rate_divisor);
 
     if (dump_capture_init(&u->dump, &u->world, u->seed, u->dump_pages,
                           u->dump_interval, u->started_at) != 0) {
@@ -231,6 +241,7 @@ static void usage(const char *prog)
     printf("  --ants N            2,4,8,16,32\n");
     printf("  --quantum N         maximum instructions per dispatch (1..4096)\n");
     printf("  --min-service N     minimum normal dispatch batch (default 16)\n");
+    printf("  --token-rate-divisor N  divide all ant token generation rates (default 1)\n");
     printf("  --workers N         Linux worker pthreads (default 2)\n");
     printf("  --width N            window width (multiple of 4)\n");
     printf("  --height N           window height (multiple of 4)\n");
@@ -258,6 +269,9 @@ static void choose_new_seed(Universe *u)
     u->seed = rng_entropy_seed();
 }
 
+/* Interactive controls deliberately modify scheduler policy/population rather
+ * than touching worker threads directly. This keeps control-plane operations
+ * serialized through the scheduler. */
 static void handle_key(Universe *u, SDL_Keycode key)
 {
     if (key == SDLK_ESCAPE) {
@@ -340,6 +354,9 @@ static void headless_poll_input(Universe *u)
     }
 }
 
+/* Main control/render loop. Workers evolve the universe concurrently while
+ * this thread handles input, periodic dump capture, rendering and watchdog-like
+ * lifetime restart behavior. Rendering is therefore only an observer. */
 static bool run_universe(Universe *u)
 {
     WorkerArg args[8];
@@ -427,6 +444,7 @@ int main(int argc, char **argv)
     size_t ants = DEFAULT_ANTS;
     size_t quantum = DEFAULT_QUANTUM;
     size_t min_service = DEFAULT_MIN_SERVICE;
+    size_t token_rate_divisor = DEFAULT_TOKEN_RATE_DIVISOR;
     size_t workers = DEFAULT_WORKERS;
     size_t width = DEFAULT_WIDTH;
     size_t height = DEFAULT_HEIGHT;
@@ -444,6 +462,7 @@ int main(int argc, char **argv)
         {"ants", required_argument, NULL, 'a'},
         {"quantum", required_argument, NULL, 'q'},
         {"min-service", required_argument, NULL, 'b'},
+        {"token-rate-divisor", required_argument, NULL, 'v'},
         {"workers", required_argument, NULL, 'w'},
         {"width", required_argument, NULL, 'x'},
         {"height", required_argument, NULL, 'y'},
@@ -458,13 +477,14 @@ int main(int argc, char **argv)
     };
 
     for (;;) {
-        int c = getopt_long(argc, argv, "s:a:q:b:w:x:y:m:d:i:D:nHh", opts, NULL);
+        int c = getopt_long(argc, argv, "s:a:q:b:v:w:x:y:m:d:i:D:nHh", opts, NULL);
         if (c == -1) break;
         switch (c) {
             case 's': if (!parse_seed(optarg, &explicit_seed)) { fprintf(stderr, "bad --seed\n"); return 2; } has_seed = true; break;
             case 'a': if (!parse_uint(optarg, &ants) || !valid_population(ants)) { fprintf(stderr, "--ants must be 2,4,8,16,32\n"); return 2; } break;
             case 'q': if (!parse_uint(optarg, &quantum) || quantum < MIN_QUANTUM || quantum > MAX_QUANTUM) { fprintf(stderr, "bad --quantum\n"); return 2; } break;
             case 'b': if (!parse_uint(optarg, &min_service) || min_service < 1 || min_service > MAX_QUANTUM) { fprintf(stderr, "bad --min-service\n"); return 2; } break;
+            case 'v': if (!parse_uint(optarg, &token_rate_divisor) || token_rate_divisor > UINT32_MAX) { fprintf(stderr, "bad --token-rate-divisor\n"); return 2; } break;
             case 'w': if (!parse_uint(optarg, &workers) || workers > 8) { fprintf(stderr, "--workers must be 1..8\n"); return 2; } break;
             case 'x': if (!parse_uint(optarg, &width)) { fprintf(stderr, "bad --width\n"); return 2; } break;
             case 'y': if (!parse_uint(optarg, &height)) { fprintf(stderr, "bad --height\n"); return 2; } break;
@@ -486,6 +506,8 @@ int main(int argc, char **argv)
         return 2;
     }
 
+    /* Command-line values are copied into Universe once; restarts reuse this
+     * configuration while selecting a fresh random seed. */
     Universe u;
     memset(&u, 0, sizeof(u));
     u.width = (int)width;
@@ -494,6 +516,7 @@ int main(int argc, char **argv)
     u.initial_ants = ants;
     u.quantum = quantum;
     u.min_service = min_service;
+    u.token_rate_divisor = (uint32_t)token_rate_divisor;
     u.lifetime_minutes = minutes;
     u.dump_pages = dump_pages;
     u.dump_interval = dump_interval;
@@ -519,6 +542,7 @@ int main(int argc, char **argv)
             scheduler_destroy(&u.scheduler);
             if (scheduler_init(&u.scheduler, &u.colony, SCHED_WFQ, u.quantum) != 0) break;
             scheduler_set_min_service(&u.scheduler, u.min_service);
+            scheduler_set_token_rate_divisor(&u.scheduler, u.token_rate_divisor);
         }
         if (u.quit) break;
     }

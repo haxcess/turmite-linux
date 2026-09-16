@@ -17,8 +17,8 @@ static inline void accrue_tokens(Scheduler *scheduler, size_t index, Ant *ant, u
     uint64_t elapsed_us = now_us - last_us;
     uint32_t rate = atomic_load_explicit(&ant->token_rate, memory_order_relaxed);
     const uint32_t rate_scale = atomic_load_explicit(&scheduler->token_rate_scale, memory_order_relaxed);
-    uint64_t effective_rate = rate;
-    if (rate_scale > 1u) effective_rate *= rate_scale;
+    const uint32_t rate_divisor = atomic_load_explicit(&scheduler->token_rate_divisor, memory_order_relaxed);
+    uint64_t effective_rate = (uint64_t)rate * (uint64_t)(rate_scale ? rate_scale : 1u);
     uint32_t cap_fp = atomic_load_explicit(&ant->token_capacity_fp, memory_order_relaxed);
     uint32_t current_fp = atomic_load_explicit(&ant->tokens_fp, memory_order_relaxed);
     scheduler->last_token_us[index] = now_us;
@@ -29,7 +29,11 @@ static inline void accrue_tokens(Scheduler *scheduler, size_t index, Ant *ant, u
      * elapsed interval avoids overflow and collapses the old multi-division
      * accrual calculation to one 64-bit division. */
     if (elapsed_us > 1000000ull) elapsed_us = 1000000ull;
-    uint64_t add_fp = (effective_rate * elapsed_us * TOKEN_FP_ONE) / 1000000ull;
+    /* Apply the universe-wide slow-motion divisor during accrual rather than
+     * rewriting each ant's inherited token rate. This preserves relative ant
+     * speeds while allowing the whole simulation to run visually slower. */
+    uint64_t divisor = (uint64_t)(rate_divisor ? rate_divisor : 1u);
+    uint64_t add_fp = (effective_rate * elapsed_us * TOKEN_FP_ONE) / (1000000ull * divisor);
     if (add_fp >= room_fp) current_fp = cap_fp;
     else current_fp += (uint32_t)add_fp;
     atomic_store_explicit(&ant->tokens_fp, current_fp, memory_order_relaxed);
@@ -218,6 +222,17 @@ void scheduler_set_token_rate_scale(Scheduler *scheduler, uint32_t scale)
     scheduler_wake_all(scheduler);
 }
 
+void scheduler_set_token_rate_divisor(Scheduler *scheduler, uint32_t divisor)
+{
+    atomic_store_explicit(&scheduler->token_rate_divisor, divisor ? divisor : 1u, memory_order_release);
+    scheduler_wake_all(scheduler);
+}
+
+uint32_t scheduler_get_token_rate_divisor(const Scheduler *scheduler)
+{
+    return scheduler ? atomic_load_explicit(&scheduler->token_rate_divisor, memory_order_relaxed) : 1u;
+}
+
 void scheduler_set_quantum(Scheduler *scheduler, size_t quantum)
 {
     atomic_store_explicit(&scheduler->quantum, quantum ? quantum : 1u, memory_order_release);
@@ -284,6 +299,7 @@ int scheduler_init(Scheduler *scheduler, AntColony *colony, SchedulerPolicy poli
     atomic_init(&scheduler->quantum, quantum ? quantum : 1u);
     atomic_init(&scheduler->min_service, 1u);
     atomic_init(&scheduler->token_rate_scale, 1u);
+    atomic_init(&scheduler->token_rate_divisor, 1u);
     const uint64_t now_us = monotonic_us();
     for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
         scheduler->fair_credit[i] = 0.0;
