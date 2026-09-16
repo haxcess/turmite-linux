@@ -22,12 +22,13 @@ typedef struct {
     _Atomic bool paused;
     _Atomic uint64_t dispatches;
     double fair_credit[TURMITE_MAX_ANTS];
+    uint64_t last_token_us[TURMITE_MAX_ANTS];
     _Atomic size_t quantum;
 } Scheduler;
 
 int scheduler_init(Scheduler *scheduler, AntColony *colony, SchedulerPolicy policy, size_t quantum);
 void scheduler_destroy(Scheduler *scheduler);
-Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us);
+Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us, size_t *granted_quantum);
 void scheduler_release(Scheduler *scheduler, Ant *ant, size_t executed, uint64_t now_us);
 void scheduler_set_quantum(Scheduler *scheduler, size_t quantum);
 size_t scheduler_get_quantum(const Scheduler *scheduler);

@@ -1,44 +1,47 @@
-# Memory and performance notes
+# Memory and Performance Notes
 
-The prototype treats optimization as an experiment, not a license to change the machine's semantics.
+## Current structure layout
 
-## Ant layout
+The hot `Ant` context is intentionally compact. Scheduler-only token timestamps and cold diagnostic counters live outside `Ant`. On x86-64 the current layout is:
 
-The ant structure has been reduced by removing the unused `quantum_hint` field, packing lifecycle booleans into one atomic flag word, removing the redundant ant ID field (array index is the ID), replacing floating-point token balances with Q16 fixed-point, and giving each ant its own non-atomic LFSR state.
+- `sizeof(Ant) = 48` bytes
+- `sizeof(AntStats) = 16` bytes
+- `sizeof(AntColony) = 2064` bytes
 
-Only fields that can be observed or changed by another thread are atomic. Rule pointer, scheduler-only time bookkeeping, and the ant-local RNG belong to the leased worker/scheduler ownership model.
+This keeps the execution context small enough that the fixed maximum of 32 ants remains cache-friendly while preserving the forensic counters needed by the dump system.
 
-## Hot-loop changes
+## Hot-path changes
 
-The expensive operations removed from the instruction loop are:
+- One whole token is consumed with a single relaxed atomic RMW; the scheduler grants no more instructions than the ant currently has whole tokens for.
+- Ant state and heading are kept in worker-local variables throughout a quantum and published at quantum end (or immediately on HALT).
+- Instruction counts are accumulated once per quantum instead of once per instruction.
+- Runtime RNG state is per-ant.
+- Token timestamps are scheduler-owned rather than stored in every ant.
+- Token accrual clamps elapsed time at one second; every configured bucket fills within less than one second, which removes the older multi-division calculation.
+- Collision detection remains an O(32) scan by design.
+- Scheduler selection remains an O(32) scan by design.
 
-* `clock_gettime()` once per instruction; time is sampled at dispatch boundaries.
-* repeated token-rate/capacity floating-point arithmetic; token accounting occurs at scheduler boundaries.
-* general-purpose modulo in the hot world index path; x/y are kept in range and the index is `y * width + x`.
-* repeated global RNG contention; runtime mutation uses each ant's private LFSR.
-* scheduler quantum locking; quantum is an atomic read.
+## HALT semantics
 
-Collision discovery remains an O(32) scan intentionally because 32 is the architectural population ceiling.
+A built-in rule may contain a `HALT` action (Busy Beaver currently does). HALT now means the ant becomes non-runnable but remains part of the population. Population decreases only through explicit halving/drain pressure. This keeps the population setpoint stable.
 
-## Headless mode
+A universe with enough HALTED ants can still become computationally quiescent; the five-minute lifecycle remains the intended stale-universe escape hatch.
 
-Use `--headless` to remove SDL rendering completely. Workers then run continuously while the control thread wakes periodically to service the debug dump and stdin.
+## Profiling
 
-Type `Q` followed by Enter to stop and write the rolling debug dump. `SIGUSR1` can be used by an external harness as a future extension.
+The project includes:
 
-## Measuring the result
-
-Useful Linux tools:
-
-```bash
-perf stat -d ./turmite --headless --ants 32 --quantum 64 --minutes 0.25 --dump-pages 1
-perf record -g ./turmite --headless --ants 32 --quantum 64 --minutes 0.25 --dump-pages 1
-perf report
+```text
+make bench
+make perf-stat
 ```
 
-For cache behavior:
+`make perf-stat` runs:
 
-```bash
-perf stat -e cycles,instructions,cache-references,cache-misses,branches,branch-misses \
-  ./turmite --headless --ants 32 --quantum 64 --minutes 0.25 --dump-pages 1
+```text
+perf stat -d -r 5 ./tests/bench 32 256 3
 ```
+
+For fair comparisons, use the same seed/configuration and compare several runs. The benchmark reports instruction throughput, dispatches, collisions, and population.
+
+When `perf` is unavailable, the benchmark can still be wrapped with `/usr/bin/time` for coarse CPU-utilization measurements.

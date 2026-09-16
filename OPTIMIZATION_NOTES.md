@@ -28,3 +28,14 @@ Collision detection remains O(32) by design because occupancy RAM is deliberatel
 ## Important semantic constraint
 
 Do not replace the world array with a packed 3-bit representation merely for memory savings. Six colors fit in three bits, but packed updates would turn one-cell writes into read-modify-write operations and would interfere with the intended atomic last-write-wins behavior.
+
+
+## Second pass
+
+The second pass fixes an unintended population-loss bug: HALT rules no longer decrement the active population. The Busy Beaver rule contains a HALT transition, so the previous implementation could silently shrink the colony without a requested population reduction.
+
+The ant context was reduced from 72 bytes to 48 bytes by moving scheduler-only timestamps and cold diagnostic counters out of the hot structure. Scheduler timestamps are stored in `Scheduler.last_token_us[]`; instruction/mutation counters are stored in `AntColony.stats[]`.
+
+The executor now accepts a scheduler-granted instruction count, allowing the inner loop to avoid loading the token balance on every instruction. State/heading publication and instruction accounting happen once per quantum.
+
+The token accrual math was simplified to one 64-bit division after clamping elapsed time to one second.

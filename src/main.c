@@ -85,10 +85,10 @@ static void *worker_main(void *arg)
     Universe *u = wa->u;
 
     while (!atomic_load_explicit(&u->quit, memory_order_acquire)) {
-        Ant *ant = scheduler_acquire(&u->scheduler, mono_microseconds());
+        size_t quantum = 0;
+        Ant *ant = scheduler_acquire(&u->scheduler, mono_microseconds(), &quantum);
         if (!ant) break;
 
-        size_t quantum = scheduler_get_quantum(&u->scheduler);
         size_t executed = ant_execute_quantum(ant, &u->colony, &u->world, quantum);
         scheduler_release(&u->scheduler, ant, executed, mono_microseconds());
     }
@@ -106,7 +106,7 @@ static void universe_seed(Universe *u)
     for (size_t i = 0; i < u->initial_ants; ++i) {
         Ant *ant = &u->colony.ants[i];
         ant_randomize(ant, &u->world, &u->rng,
-                      rules_pick(rng_uniform(&u->rng, (uint32_t)rules_count())), now);
+                      rules_pick(rng_uniform(&u->rng, (uint32_t)rules_count())));
     }
     atomic_store_explicit(&u->colony.active_population, u->initial_ants, memory_order_release);
     u->started_at = now;
@@ -122,7 +122,6 @@ static int universe_init(Universe *u, uint32_t seed)
         return -1;
     }
 
-    ant_colony_zero(&u->colony);
     universe_seed(u);
 
     if (scheduler_init(&u->scheduler, &u->colony, SCHED_WFQ, u->quantum) != 0) {

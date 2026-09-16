@@ -29,10 +29,19 @@ src/%.o: src/%.c
 
 -include $(OBJ:.o=.d)
 
-clean:
-	rm -f $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes
+bench: tests/bench
+	./tests/bench 32 256 3
 
-.PHONY: core-test tsan-test struct-report
+perf-stat: tests/bench
+	perf stat -d -r 5 ./tests/bench 32 256 3
+
+tests/bench: tests/bench.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c
+	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $^ -pthread -lm -o $@
+
+clean:
+	rm -f $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench
+
+.PHONY: core-test tsan-test struct-report bench perf-stat
 
 core-test: tests/headless_smoke
 	./tests/headless_smoke

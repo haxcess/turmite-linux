@@ -23,7 +23,8 @@ enum {
     ANT_F_LEASED    = 1u << 1,
     ANT_F_CLOBBERED = 1u << 2,
     ANT_F_EXPIRED   = 1u << 3,
-    ANT_F_DRAINING  = 1u << 4
+    ANT_F_DRAINING  = 1u << 4,
+    ANT_F_HALTED    = 1u << 5
 };
 
 typedef struct Ant Ant;
@@ -47,32 +48,35 @@ struct Ant {
     _Atomic uint32_t token_capacity_fp;
     _Atomic uint32_t weight;
 
-    _Atomic uint64_t instructions;
-    _Atomic uint64_t mutations;
-
-    /* Scheduler-only time bookkeeping. Not read by the dump path. */
-    uint64_t last_token_us;
-
     /* Per-ant LFSR removes contention on one shared runtime RNG. */
     uint32_t rng_state;
 };
 
+typedef struct {
+    _Atomic uint64_t instructions;
+    _Atomic uint64_t mutations;
+} AntStats;
+
 struct AntColony {
     Ant ants[TURMITE_MAX_ANTS];
+    AntStats stats[TURMITE_MAX_ANTS];
     _Atomic size_t active_population;
     _Atomic uint64_t collisions;
 };
 
 void ant_colony_zero(AntColony *colony);
-void ant_randomize(Ant *ant, const World *world, Lfsr32 *rng, const TurmiteRule *rule, uint64_t now_us);
-void ant_clone(Ant *dst, const Ant *src, const World *world, Lfsr32 *rng, uint64_t now_us);
-void ant_mutate_in_place(Ant *ant, uint64_t now_us);
+void ant_randomize(Ant *ant, const World *world, Lfsr32 *rng, const TurmiteRule *rule);
+void ant_clone(Ant *dst, const Ant *src, const World *world, Lfsr32 *rng);
+void ant_mutate_in_place(Ant *ant);
 uint16_t ant_rule_index(const Ant *ant);
 
 /* Execute up to quantum instructions. Returns the number actually executed. */
 size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t quantum);
 
 /* Fixed-point token helpers used by scheduler/debug paths. */
+uint64_t ant_instruction_count(const AntColony *colony, size_t ant_index);
+uint64_t ant_mutation_count(const AntColony *colony, size_t ant_index);
+
 double ant_tokens(const Ant *ant);
 double ant_token_rate(const Ant *ant);
 double ant_token_capacity(const Ant *ant);

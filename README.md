@@ -106,6 +106,8 @@ Useful validation targets:
 make core-test
 make tsan-test
 make struct-report
+make bench
+make perf-stat
 ```
 
 For Linux CPU profiling:
@@ -115,3 +117,20 @@ perf stat -d ./turmite --headless --ants 32 --quantum 64 --minutes 0.25 --dump-p
 perf record -g ./turmite --headless --ants 32 --quantum 64 --minutes 0.25 --dump-pages 1
 perf report
 ```
+
+
+## Fedora perf
+
+On Fedora 44, the kernel `perf` tool is packaged as `perf`. Install it with:
+
+```bash
+sudo dnf install perf
+```
+
+Then run:
+
+```bash
+make perf-stat
+```
+
+The Fedora package listing confirms `perf` is available for Fedora 44.

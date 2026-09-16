@@ -88,10 +88,9 @@ void ant_colony_zero(AntColony *colony)
         atomic_init(&ant->token_rate, 1000u);
         atomic_init(&ant->token_capacity_fp, 64u * TOKEN_FP_ONE);
         atomic_init(&ant->weight, 1u);
-        atomic_init(&ant->instructions, 0);
-        atomic_init(&ant->mutations, 0);
         ant->rule = rules_get(0);
-        ant->last_token_us = 0;
+        atomic_init(&colony->stats[i].instructions, 0);
+        atomic_init(&colony->stats[i].mutations, 0);
         ant->rng_state = (uint32_t)(0x9E3779B9u ^ (uint32_t)i);
     }
 }
@@ -101,7 +100,7 @@ static void reseed_local_rng(Ant *ant, uint32_t seed)
     ant->rng_state = seed ? seed : 1u;
 }
 
-void ant_randomize(Ant *ant, const World *world, Lfsr32 *rng, const TurmiteRule *rule, uint64_t now_us)
+void ant_randomize(Ant *ant, const World *world, Lfsr32 *rng, const TurmiteRule *rule)
 {
     /* Seed the ant-local generator from the universe RNG once. */
     reseed_local_rng(ant, rng_next(rng));
@@ -113,13 +112,10 @@ void ant_randomize(Ant *ant, const World *world, Lfsr32 *rng, const TurmiteRule 
     atomic_store_explicit(&ant->heading, (uint8_t)ant_rng_uniform(&ant->rng_state, 4u), memory_order_relaxed);
     atomic_store_explicit(&ant->state, (uint8_t)ant_rng_uniform(&ant->rng_state, rule->states), memory_order_relaxed);
     reset_schedule(ant, &ant->rng_state);
-    atomic_store_explicit(&ant->instructions, 0, memory_order_relaxed);
-    atomic_store_explicit(&ant->mutations, 0, memory_order_relaxed);
-    ant->last_token_us = now_us;
     atomic_store_explicit(&ant->flags, ANT_F_ENABLED, memory_order_release);
 }
 
-void ant_clone(Ant *dst, const Ant *src, const World *world, Lfsr32 *rng, uint64_t now_us)
+void ant_clone(Ant *dst, const Ant *src, const World *world, Lfsr32 *rng)
 {
     const TurmiteRule *src_rule = src->rule;
     dst->rule = src_rule;
@@ -132,10 +128,7 @@ void ant_clone(Ant *dst, const Ant *src, const World *world, Lfsr32 *rng, uint64
     atomic_store_explicit(&dst->token_capacity_fp, atomic_load_explicit(&src->token_capacity_fp, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->tokens_fp, 0, memory_order_relaxed);
     atomic_store_explicit(&dst->weight, atomic_load_explicit(&src->weight, memory_order_relaxed), memory_order_relaxed);
-    atomic_store_explicit(&dst->instructions, 0, memory_order_relaxed);
-    atomic_store_explicit(&dst->mutations, 0, memory_order_relaxed);
     reseed_local_rng(dst, rng_next(rng));
-    dst->last_token_us = now_us;
     atomic_store_explicit(&dst->flags, ANT_F_ENABLED, memory_order_release);
 }
 
@@ -144,7 +137,7 @@ uint16_t ant_rule_index(const Ant *ant)
     return ant ? atomic_load_explicit(&ant->rule_index, memory_order_relaxed) : 0;
 }
 
-void ant_mutate_in_place(Ant *ant, uint64_t now_us)
+void ant_mutate_in_place(Ant *ant)
 {
     const TurmiteRule *rule = rules_pick(ant_rng_uniform(&ant->rng_state, (uint32_t)rules_count()));
     ant->rule = rule;
@@ -152,36 +145,10 @@ void ant_mutate_in_place(Ant *ant, uint64_t now_us)
     atomic_store_explicit(&ant->heading, (uint8_t)ant_rng_uniform(&ant->rng_state, 4u), memory_order_relaxed);
     atomic_store_explicit(&ant->state, (uint8_t)ant_rng_uniform(&ant->rng_state, rule->states), memory_order_relaxed);
     reset_schedule(ant, &ant->rng_state);
-    ant->last_token_us = now_us;
-    atomic_fetch_add_explicit(&ant->mutations, 1u, memory_order_relaxed);
     atomic_fetch_and_explicit(&ant->flags,
-                              ~(uint32_t)(ANT_F_CLOBBERED | ANT_F_EXPIRED | ANT_F_DRAINING),
+                              ~(uint32_t)(ANT_F_CLOBBERED | ANT_F_EXPIRED | ANT_F_DRAINING | ANT_F_HALTED),
                               memory_order_acq_rel);
     atomic_fetch_or_explicit(&ant->flags, ANT_F_ENABLED, memory_order_release);
-}
-
-static inline void accrue_tokens(Ant *ant, uint64_t now_us)
-{
-    if (now_us <= ant->last_token_us) return;
-    uint64_t elapsed_us = now_us - ant->last_token_us;
-    uint32_t rate = atomic_load_explicit(&ant->token_rate, memory_order_relaxed);
-    uint32_t cap_fp = atomic_load_explicit(&ant->token_capacity_fp, memory_order_relaxed);
-    uint32_t current_fp = atomic_load_explicit(&ant->tokens_fp, memory_order_relaxed);
-    ant->last_token_us = now_us;
-    if (rate == 0 || current_fp >= cap_fp) return;
-
-    /* Once the bucket is full, additional elapsed time is irrelevant. */
-    uint64_t room_fp = (uint64_t)cap_fp - current_fp;
-    uint64_t max_elapsed_us = ((room_fp + TOKEN_FP_ONE - 1u) / TOKEN_FP_ONE * 1000000ull + rate - 1u) / rate;
-    if (elapsed_us > max_elapsed_us) elapsed_us = max_elapsed_us;
-
-    const uint64_t whole = (uint64_t)rate * elapsed_us;
-    const uint64_t whole_tokens = whole / 1000000ull;
-    const uint64_t rem = whole % 1000000ull;
-    uint64_t add_fp = whole_tokens * TOKEN_FP_ONE + (rem * TOKEN_FP_ONE) / 1000000ull;
-    if (add_fp >= room_fp) current_fp = cap_fp;
-    else current_fp += (uint32_t)add_fp;
-    atomic_store_explicit(&ant->tokens_fp, current_fp, memory_order_relaxed);
 }
 
 static Ant *find_collision(Ant *self, AntColony *colony, uint32_t x, uint32_t y)
@@ -224,6 +191,7 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
 {
     uint32_t f = flags_load(ant);
     if (!(f & ANT_F_ENABLED)) return 0;
+    if (f & ANT_F_HALTED) return 0;
 
     uint32_t x = atomic_load_explicit(&ant->x, memory_order_relaxed);
     uint32_t y = atomic_load_explicit(&ant->y, memory_order_relaxed);
@@ -234,12 +202,10 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
     size_t executed = 0;
 
     while (executed < quantum) {
-        f = flags_load(ant);
-        if (f & ANT_F_CLOBBERED) break;
-        if (!(f & ANT_F_ENABLED)) break;
-
-        uint32_t token_fp = atomic_load_explicit(&ant->tokens_fp, memory_order_relaxed);
-        if (token_fp < TOKEN_FP_ONE) break;
+        /* The scheduler grants no more instructions than the ant currently has
+         * whole tokens for, so the hot path can consume one token with a single
+         * relaxed RMW. A collision may clobber the ant while it is leased; the
+         * current quantum is its task and may complete. */
         atomic_fetch_sub_explicit(&ant->tokens_fp, TOKEN_FP_ONE, memory_order_relaxed);
 
         const size_t idx = (size_t)y * width + x;
@@ -256,13 +222,14 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
 
         state = action->next_state;
         heading = apply_turn(heading, action->turn);
-        atomic_store_explicit(&ant->state, state, memory_order_relaxed);
-        atomic_store_explicit(&ant->heading, heading, memory_order_relaxed);
-
         if (action->halt) {
-            atomic_fetch_or_explicit(&ant->flags, ANT_F_EXPIRED, memory_order_acq_rel);
-            atomic_fetch_and_explicit(&ant->flags, ~ANT_F_ENABLED, memory_order_acq_rel);
-            atomic_fetch_sub_explicit(&colony->active_population, 1u, memory_order_relaxed);
+            /* HALT is a rule-completion state, not a population death. The ant
+             * remains resident and counts toward population, but is no longer
+             * runnable. Population changes are reserved for explicit halving
+             * pressure and collision mutation. */
+            atomic_store_explicit(&ant->state, state, memory_order_relaxed);
+            atomic_store_explicit(&ant->heading, heading, memory_order_relaxed);
+            atomic_fetch_or_explicit(&ant->flags, ANT_F_HALTED, memory_order_acq_rel);
             ++executed;
             break;
         }
@@ -282,11 +249,24 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
             if (other) resolve_collision(ant, other, colony);
         }
 
-        atomic_fetch_add_explicit(&ant->instructions, 1u, memory_order_relaxed);
         ++executed;
     }
 
+    atomic_store_explicit(&ant->state, state, memory_order_relaxed);
+    atomic_store_explicit(&ant->heading, heading, memory_order_relaxed);
     return executed;
+}
+
+uint64_t ant_instruction_count(const AntColony *colony, size_t ant_index)
+{
+    if (!colony || ant_index >= TURMITE_MAX_ANTS) return 0;
+    return atomic_load_explicit(&colony->stats[ant_index].instructions, memory_order_relaxed);
+}
+
+uint64_t ant_mutation_count(const AntColony *colony, size_t ant_index)
+{
+    if (!colony || ant_index >= TURMITE_MAX_ANTS) return 0;
+    return atomic_load_explicit(&colony->stats[ant_index].mutations, memory_order_relaxed);
 }
 
 double ant_tokens(const Ant *ant)

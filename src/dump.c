@@ -99,7 +99,7 @@ static uint64_t colony_instruction_total(const AntColony *colony)
 {
     uint64_t total = 0;
     for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
-        total += atomic_load_explicit(&colony->ants[i].instructions, memory_order_relaxed);
+        total += ant_instruction_count(colony, i);
     }
     return total;
 }
@@ -152,8 +152,8 @@ static void capture_one(DumpCapture *capture, const World *world, const AntColon
         out->token_capacity = ant_token_capacity(ant);
         out->weight = atomic_load_explicit(&ant->weight, memory_order_relaxed);
         out->fair_credit = scheduler->fair_credit[i];
-        out->instructions = atomic_load_explicit(&ant->instructions, memory_order_relaxed);
-        out->mutations = atomic_load_explicit(&ant->mutations, memory_order_relaxed);
+        out->instructions = ant_instruction_count(colony, i);
+        out->mutations = ant_mutation_count(colony, i);
     }
     pthread_mutex_unlock((pthread_mutex_t *)&scheduler->lock);
 

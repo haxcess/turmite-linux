@@ -30,9 +30,10 @@ static void *run(void *arg)
 {
     Worker *w = arg;
     while (!atomic_load_explicit(&stop_flag, memory_order_relaxed)) {
-        Ant *ant = scheduler_acquire(w->scheduler, now_us());
+        size_t grant = 0;
+        Ant *ant = scheduler_acquire(w->scheduler, now_us(), &grant);
         if (!ant) break;
-        size_t n = ant_execute_quantum(ant, w->colony, w->world, scheduler_get_quantum(w->scheduler));
+        size_t n = ant_execute_quantum(ant, w->colony, w->world, grant);
         scheduler_release(w->scheduler, ant, n, now_us());
     }
     return NULL;
@@ -51,7 +52,7 @@ int main(void)
     ant_colony_zero(&colony);
     rng_seed(&rng, UINT32_C(0x12345678));
     for (size_t i = 0; i < 8; ++i) {
-        ant_randomize(&colony.ants[i], &world, &rng, rules_get(i % rules_count()), now_us());
+        ant_randomize(&colony.ants[i], &world, &rng, rules_get(i % rules_count()));
     }
     atomic_store(&colony.active_population, 8);
     if (scheduler_init(&scheduler, &colony, SCHED_WFQ, 32) != 0) return 2;
@@ -71,10 +72,17 @@ int main(void)
     pthread_join(t0, NULL);
     pthread_join(t1, NULL);
 
+    size_t population = atomic_load(&colony.active_population);
+    if (population != 8) {
+        fprintf(stderr, "smoke failed: population changed unexpectedly: %zu\n", population);
+        scheduler_destroy(&scheduler);
+        world_destroy(&world);
+        return 3;
+    }
     printf("smoke ok: instructions=%llu collisions=%llu population=%zu\n",
-           (unsigned long long)(atomic_load(&colony.ants[0].instructions)),
+           (unsigned long long)(ant_instruction_count(&colony, 0)),
            (unsigned long long)(atomic_load(&colony.collisions)),
-           atomic_load(&colony.active_population));
+           population);
 
     scheduler_destroy(&scheduler);
     world_destroy(&world);
