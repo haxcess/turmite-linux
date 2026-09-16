@@ -1,9 +1,13 @@
 #include "rules.h"
 
+/* Compact constructors keep the static rule catalogue readable. Each table row
+ * is one internal state; each column is the color currently under the ant. */
 #define A(w,t,n) { (uint8_t)(w), (t), (uint8_t)(n), false }
 #define HLT(w,t,n) { (uint8_t)(w), (t), (uint8_t)(n), true }
 #define NOOP(c) { (uint8_t)(c), TURN_F, 0, false }
 
+/* Built-in gene pool. Rules may use fewer than six colors or four states; the
+ * interpreter only indexes the active rectangle declared by each rule. */
 static const TurmiteRule RULES[] = {
     {
         "langtons", "Langton's Ant", 1, 2,
@@ -140,6 +144,8 @@ const TurmiteRule *rules_get(size_t index)
     return &RULES[index];
 }
 
+/* Modulo selection is convenient for RNG output and mutation without a branch
+ * at every caller. */
 const TurmiteRule *rules_pick(size_t index)
 {
     return rules_get(index % rules_count());
@@ -160,6 +166,9 @@ const char *turn_name(TurnCode turn)
         default: return "?";
     }
 }
+
+/* Rules are static objects, so pointer identity is enough to recover the small
+ * catalogue index stored in ant/debug metadata. */
 size_t rules_index_of(const TurmiteRule *rule)
 {
     if (!rule) return 0;
@@ -168,4 +177,3 @@ size_t rules_index_of(const TurmiteRule *rule)
     }
     return 0;
 }
-
