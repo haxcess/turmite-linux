@@ -18,10 +18,17 @@ typedef struct {
     int width;
     int height;
     int cell_size;
+    int display_index;
+    bool fullscreen;
     bool hud_visible;
 } Renderer;
 
-int renderer_init(Renderer *renderer, int width, int height, int cell_size, bool hud_visible);
+/* Query the desktop pixel dimensions of one SDL display. This also performs
+ * the minimal SDL video initialization needed before the world is allocated. */
+int renderer_display_size(int display_index, int *width, int *height);
+
+int renderer_init(Renderer *renderer, int width, int height, int cell_size,
+                  bool hud_visible, int display_index, bool fullscreen);
 void renderer_destroy(Renderer *renderer);
 void renderer_render(Renderer *renderer, const World *world, const AntColony *colony,
                      const Scheduler *scheduler, size_t workers, uint32_t seed, double universe_age,
