@@ -3,7 +3,7 @@
 #include <stdlib.h>
 
 const uint32_t TURMITE_DISPLAY_BASE_PALETTE[TURMITE_COLORS] = {
-    0x09090Du, /* near-black */
+    0x000000u, /* black */
     0xF2F2F2u, /* white */
     0xE84A5Fu, /* red */
     0xF5D547u, /* yellow */
@@ -49,7 +49,12 @@ void world_destroy(World *world)
 void world_clear(World *world)
 {
     if (!world || !world->data || !world->ink) return;
-    const uint32_t background = atomic_load_explicit(&world->ink_palette[0], memory_order_relaxed);
+
+    /* Logical color zero is also the physical blank paper color. Keep it true
+     * black so untouched cells and later rule writes of color zero agree. */
+    const uint32_t background = TURMITE_DISPLAY_BASE_PALETTE[0];
+    atomic_store_explicit(&world->ink_palette[0], background, memory_order_relaxed);
+
     for (size_t i = 0; i < world->cells; ++i) {
         atomic_store_explicit(&world->data[i], 0u, memory_order_relaxed);
         atomic_store_explicit(&world->ink[i], background, memory_order_relaxed);
