@@ -19,6 +19,10 @@
 #include <unistd.h>
 #include <poll.h>
 
+/* Linux process orchestration. main.c owns lifetime/configuration, while the
+ * scheduler and ant engine own simulation policy. Worker threads do only useful
+ * turmite execution; this thread handles input, rendering, dumps and restarts. */
+
 #define DEFAULT_WIDTH 1200
 #define DEFAULT_HEIGHT 800
 #define CELL_SIZE 1
@@ -35,6 +39,8 @@
 #define DEFAULT_DUMP_INTERVAL 1.0
 #define MAX_DUMP_PAGES 1023
 
+/* Monotonic time drives simulation age and token accounting so wall-clock
+ * adjustments cannot make ants gain or lose execution budget unexpectedly. */
 static double mono_seconds(void)
 {
     struct timespec ts;
@@ -49,6 +55,9 @@ static uint64_t mono_microseconds(void)
     return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
 }
 
+/* Universe groups one complete run plus the process-level configuration reused
+ * across five-minute restarts. The worker array is recreated only at process
+ * initialization; workers themselves are started/stopped for each run. */
 typedef struct {
     World world;
     AntColony colony;
@@ -196,6 +205,8 @@ static void universe_destroy(Universe *u)
     world_destroy(&u->world);
 }
 
+/* Workers are independent consumers of scheduler leases. Partial startup
+ * failure stops the scheduler and joins already-created threads before return. */
 static int universe_start_workers(Universe *u, WorkerArg *args)
 {
     for (size_t i = 0; i < u->workers; ++i) {
@@ -219,6 +230,8 @@ static void universe_stop_workers(Universe *u, size_t created)
     for (size_t i = 0; i < created; ++i) pthread_join(u->threads[i], NULL);
 }
 
+/* Parsing helpers reject zero for numeric controls where zero has no useful
+ * interpretation; callers add any narrower semantic range checks. */
 static bool parse_uint(const char *s, size_t *out)
 {
     char *end = NULL;
@@ -346,6 +359,8 @@ static void handle_key(Universe *u, SDL_Keycode key)
     }
 }
 
+/* Headless input is deliberately non-blocking so the control thread can keep
+ * servicing watchdog and dump timers while workers run independently. */
 static void headless_poll_input(Universe *u)
 {
     if (!u->headless || u->stdin_eof) return;
@@ -383,6 +398,8 @@ static bool run_universe(Universe *u)
     dump_capture_reset(&u->dump, &u->world, u->seed, u->started_at);
     dump_capture_now(&u->dump, &u->world, &u->colony, &u->scheduler, &u->rng, 0.0, mono_seconds());
 
+    /* Rendering is independently throttled to 60 Hz. Simulation workers are not
+     * frame-locked and may execute any amount of work between observations. */
     double next_frame = mono_seconds();
     const double frame_period = 1.0 / 60.0;
 
@@ -438,6 +455,8 @@ static bool run_universe(Universe *u)
 
     if (timed_out) u->restart = true;
 
+    /* Hold the final frame briefly so a restart/quit does not visually tear the
+     * last state away immediately. */
     if (!u->headless && (u->restart || u->quit || timed_out)) {
         const Uint32 final_ms = 400;
         Uint32 start = SDL_GetTicks();
@@ -458,6 +477,8 @@ static bool run_universe(Universe *u)
 
 int main(int argc, char **argv)
 {
+    /* Parse into local configuration first. Universe is constructed only after
+     * display-derived dimensions and all validation are known. */
     size_t ants = DEFAULT_ANTS;
     size_t quantum = DEFAULT_QUANTUM;
     size_t min_service = DEFAULT_MIN_SERVICE;
@@ -563,6 +584,9 @@ int main(int argc, char **argv)
     u.renderer.hud_visible = hud;
     u.hud_visible = hud;
 
+    /* The outer lifecycle loop emulates the eventual appliance watchdog: each
+     * timeout/restart reuses allocated subsystems but reseeds and rebuilds the
+     * population/scheduler state for a new universe. */
     bool restart = true;
     while (restart) {
         restart = run_universe(&u);
