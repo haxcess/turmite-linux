@@ -10,6 +10,9 @@
 #include "scheduler.h"
 #include "world.h"
 
+/* SDL is an observer of the universe, not part of its execution model. The
+ * renderer converts the persistent Linux ink plane into a texture and overlays
+ * optional development metadata without feeding state back into the ants. */
 typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
