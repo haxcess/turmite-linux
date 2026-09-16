@@ -13,6 +13,10 @@
 
 #define TURMITE_MAX_ANTS 32
 
+/* Ant execution is split between worker-local state and shared metadata. A
+ * worker leases one ant at a time, executes a burst, then publishes the cold
+ * state needed by the scheduler/debugger. */
+
 /* Token balances use Q16 fixed-point. One whole token is TOKEN_FP_ONE.
  * This preserves fractional accumulation without putting a floating-point
  * value in every ant or doing a floating-point operation per instruction. */
@@ -33,8 +37,8 @@ typedef struct Ant Ant;
 typedef struct AntColony AntColony;
 
 /* Keep only cross-thread state atomic. The ant's rule, direction and
- * internal state are owned by its worker while leased; x/y and token health
- * remain atomic because collision detection can inspect a running ant. */
+ * internal state are owned by its worker while leased; token health remains
+ * atomic because another worker may inspect it during collision resolution. */
 struct Ant {
     _Atomic uint32_t flags;
     _Atomic uint8_t heading;
@@ -61,14 +65,13 @@ struct AntColony {
     Ant ants[TURMITE_MAX_ANTS];
     AntStats stats[TURMITE_MAX_ANTS];
 
-    /* Hot collision metadata is kept densely packed and separate from Ant.
-     * A 16-bit x plus 16-bit y supports worlds up to 65535x65535 while all
-     * 32 positions fit in 128 bytes (typically two 64-byte cache lines). */
+    /* Published positions are compact snapshots, not the collision search.
+     * Packing x/y into one word keeps the cross-thread metadata dense. */
     alignas(64) _Atomic uint32_t positions[TURMITE_MAX_ANTS];
     _Atomic uint32_t enabled_mask;
 
     /* Derived O(1) read-head index. 0 means empty; 1..32 are ant index + 1.
-     * This is an acceleration structure, not part of the six-color tape. */
+     * It provides exclusive residency without becoming part of the tape. */
     _Atomic uint8_t *occupancy;
     size_t occupancy_cells;
     uint32_t occupancy_width;
@@ -91,10 +94,10 @@ uint8_t ant_occupant_at(const AntColony *colony, uint32_t x, uint32_t y);
 bool ant_try_reclaim_position(Ant *ant, AntColony *colony);
 void ant_release_occupancy(Ant *ant, AntColony *colony);
 
-/* Execute up to quantum instructions. Returns the number actually executed. */
+/* Execute up to quantum instructions. Logical tape writes are intentionally
+ * racy; occupancy claims are the separate mechanism that detects collisions. */
 size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t quantum);
 
-/* Fixed-point token helpers used by scheduler/debug paths. */
 uint64_t ant_instruction_count(const AntColony *colony, size_t ant_index);
 uint64_t ant_mutation_count(const AntColony *colony, size_t ant_index);
 
