@@ -4,18 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const uint32_t PALETTE[TURMITE_COLORS] = {
-    0x09090Du, /* near-black */
-    0xF2F2F2u, /* white */
-    0xE84A5Fu, /* red */
-    0xF5D547u, /* yellow */
-    0x58D68Du, /* green */
-    0x4EA5D9u  /* blue */
-};
-
-/* Linux-only display effect: the six logical tape colors never change, but
- * their rendered RGB values slowly drift through a shared tint. A full cycle
- * takes several minutes so old/stable regions continue to evolve visually. */
+/* Linux-only display effect: the six logical tape colors never change. Only
+ * the six colors available to future ant writes drift. Once a color is written
+ * to the visual paper, that RGB value stays there until a later ant overwrites
+ * the same cell. */
 #define PALETTE_DRIFT_SECONDS 240.0
 
 static uint32_t rgb_blend(uint32_t base, uint32_t tint, uint32_t amount)
@@ -49,25 +41,22 @@ static uint32_t palette_drift_tint(double universe_age)
 
     uint32_t r = 0, g = 0, b = 0;
     switch (segment) {
-        case 0: r = 255; g = t;   b = 0;   break; /* red -> yellow */
-        case 1: r = u;   g = 255; b = 0;   break; /* yellow -> green */
-        case 2: r = 0;   g = 255; b = t;   break; /* green -> cyan */
-        case 3: r = 0;   g = u;   b = 255; break; /* cyan -> blue */
-        case 4: r = t;   g = 0;   b = 255; break; /* blue -> magenta */
-        default:r = 255; g = 0;   b = u;   break; /* magenta -> red */
+        case 0: r = 255; g = t;   b = 0;   break;
+        case 1: r = u;   g = 255; b = 0;   break;
+        case 2: r = 0;   g = 255; b = t;   break;
+        case 3: r = 0;   g = u;   b = 255; break;
+        case 4: r = t;   g = 0;   b = 255; break;
+        default:r = 255; g = 0;   b = u;   break;
     }
     return (r << 16) | (g << 8) | b;
 }
 
-static void build_display_palette(double universe_age, uint32_t out[TURMITE_COLORS])
+static void build_ink_palette(double universe_age, uint32_t out[TURMITE_COLORS])
 {
     const uint32_t tint = palette_drift_tint(universe_age);
     for (size_t i = 0; i < TURMITE_COLORS; ++i) {
-        /* Neutrals get a restrained tint; chromatic entries can wander more.
-         * This keeps black/white patterns readable while ensuring they do not
-         * become visually static when the underlying tape stops changing. */
         const uint32_t amount = (i < 2) ? 32u : 72u;
-        out[i] = rgb_blend(PALETTE[i], tint, amount);
+        out[i] = rgb_blend(TURMITE_DISPLAY_BASE_PALETTE[i], tint, amount);
     }
 }
 
@@ -123,7 +112,7 @@ static const Glyph FONT[] = {
 static const Glyph *glyph(char c)
 {
     for (size_t i = 0; i < sizeof(FONT)/sizeof(FONT[0]); ++i) {
-        if (FONT[i].c == c) return &FONT[0 + i];
+        if (FONT[i].c == c) return &FONT[i];
     }
     return &FONT[0];
 }
@@ -234,17 +223,19 @@ void renderer_destroy(Renderer *renderer)
     memset(renderer, 0, sizeof(*renderer));
 }
 
-void renderer_render(Renderer *renderer, const World *world, const AntColony *colony,
+void renderer_render(Renderer *renderer, World *world, const AntColony *colony,
                      const Scheduler *scheduler, size_t workers, uint32_t seed, double universe_age,
                      uint64_t total_collisions, bool paused)
 {
-    uint32_t display_palette[TURMITE_COLORS];
-    build_display_palette(universe_age, display_palette);
+    /* Advance the colors available to future writes. This does not touch any
+     * RGB already stored in world->ink, so the existing paper never shifts. */
+    uint32_t ink_palette[TURMITE_COLORS];
+    build_ink_palette(universe_age, ink_palette);
+    world_set_ink_palette(world, ink_palette);
 
     const int n = world->width * world->height;
     for (int i = 0; i < n; ++i) {
-        uint8_t c = world_load(world, (size_t)i);
-        uint32_t rgb = display_palette[c % TURMITE_COLORS];
+        const uint32_t rgb = world_ink_load(world, (size_t)i);
         renderer->pixels[i] = 0xFF000000u | rgb;
     }
 
