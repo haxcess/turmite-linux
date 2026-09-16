@@ -9,23 +9,32 @@
 
 #include "ant.h"
 
+/* The scheduler is a token-gated weighted-fair dispatcher. Ants accumulate
+ * execution credit over wall time; workers lease runnable ants for bounded
+ * quanta, so logical ants outnumber physical worker threads. */
 typedef enum {
     SCHED_WFQ = 0
 } SchedulerPolicy;
 
 typedef struct {
+    /* Linux synchronization protects leases and fair-credit bookkeeping. */
     pthread_mutex_t lock;
     pthread_cond_t work_available;
     AntColony *colony;
     SchedulerPolicy policy;
     bool stopping;
     _Atomic bool paused;
+
+    /* Profiling counters are observational and do not affect scheduling. */
     _Atomic uint64_t dispatches;
     _Atomic uint64_t empty_scans;
     _Atomic uint64_t idle_waits;
     _Atomic uint64_t granted_instructions;
+
+    /* fair_credit rises by ant weight while eligible and falls by work done. */
     double fair_credit[TURMITE_MAX_ANTS];
     uint64_t last_token_us[TURMITE_MAX_ANTS];
+
     _Atomic size_t quantum;
     _Atomic size_t min_service;
     _Atomic uint32_t token_rate_scale;
@@ -52,6 +61,8 @@ bool scheduler_is_paused(const Scheduler *scheduler);
 void scheduler_wake_all(Scheduler *scheduler);
 void scheduler_stop(Scheduler *scheduler);
 
+/* Population changes are expressed as scheduler policy: doubling clones healthy
+ * ants into free slots, while halving marks weak ants to drain naturally. */
 int scheduler_double_population(Scheduler *scheduler, World *world, Lfsr32 *rng, uint64_t now_us);
 int scheduler_begin_halving(Scheduler *scheduler, size_t target_population);
 size_t scheduler_active_population(const Scheduler *scheduler);
