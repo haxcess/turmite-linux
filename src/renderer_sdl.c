@@ -4,6 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Linux renderer: generate the colors available to future writes, copy the
+ * persistent RGB paper into a streaming SDL texture, and optionally draw a HUD.
+ * It never changes the six-color logical tape seen by the ants. */
+
 /* Linux-only display effect: logical color zero is always true black. Colors
  * 1..5 available to future ant writes drift slowly; once RGB is deposited on
  * the visual paper, it stays there until that cell is overwritten. */
@@ -25,8 +29,8 @@ static uint32_t rgb_blend(uint32_t base, uint32_t tint, uint32_t amount)
     return (r << 16) | (g << 8) | b;
 }
 
-/* Six-segment RGB color wheel, implemented with integer interpolation so the
- * renderer does not need libm just for a cosmetic animation. */
+/* Six-segment RGB color wheel. Each 256-step segment linearly interpolates one
+ * primary/secondary transition, avoiding trigonometry for a cosmetic effect. */
 static uint32_t palette_drift_tint(double universe_age)
 {
     double cycle = universe_age / PALETTE_DRIFT_SECONDS;
@@ -50,6 +54,8 @@ static uint32_t palette_drift_tint(double universe_age)
     return (r << 16) | (g << 8) | b;
 }
 
+/* Build the six pen colors for this frame. These are only sampled by future
+ * ant writes; existing world->ink pixels remain unchanged. */
 static void build_ink_palette(double universe_age, uint32_t out[TURMITE_COLORS])
 {
     const uint32_t tint = palette_drift_tint(universe_age);
@@ -63,7 +69,8 @@ static void build_ink_palette(double universe_age, uint32_t out[TURMITE_COLORS])
     }
 }
 
-/* Compact 5x7 font for the development HUD. Each row is 5 bits, MSB on the left. */
+/* Compact 5x7 font keeps the HUD dependency-free. Each row is five bits, MSB
+ * on the left, and is expanded into filled SDL rectangles when drawn. */
 typedef struct { char c; uint8_t rows[7]; } Glyph;
 
 #define G(C,a,b,c,d,e,f,g) { C, {a,b,c,d,e,f,g} }
@@ -185,6 +192,8 @@ int renderer_init(Renderer *renderer, int width, int height, int cell_size,
 
     if (ensure_sdl_video() != 0) return -1;
 
+    /* SDL display indices choose the monitor. Desktop fullscreen preserves the
+     * monitor's native video mode; windowed mode is centered on the same display. */
     const int x = fullscreen ? SDL_WINDOWPOS_UNDEFINED_DISPLAY(display_index)
                              : SDL_WINDOWPOS_CENTERED_DISPLAY(display_index);
     const int y = fullscreen ? SDL_WINDOWPOS_UNDEFINED_DISPLAY(display_index)
@@ -238,6 +247,9 @@ void renderer_render(Renderer *renderer, World *world, const AntColony *colony,
     build_ink_palette(universe_age, ink_palette);
     world_set_ink_palette(world, ink_palette);
 
+    /* Snapshot the persistent ink plane into a conventional packed pixel buffer
+     * before handing it to SDL. The renderer may race with ant writes, which is
+     * acceptable because each pixel observation is independent. */
     const int n = world->width * world->height;
     for (int i = 0; i < n; ++i) {
         const uint32_t rgb = world_ink_load(world, (size_t)i);
