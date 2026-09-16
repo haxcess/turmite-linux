@@ -1,10 +1,21 @@
-# Optimization Queue
+# Optimization task queue
 
-1. Profile scheduler dispatch frequency and actual instructions per dispatch.
-2. Optimize the O(32) collision search further if `perf report` shows it remains hot. Current layout keeps a compact 32-entry position array/bitset in L1.
-3. Evaluate world-cell atomic load/store cost and cache behavior.
-4. Evaluate token accounting and scheduler lock contention.
-5. Compare scheduling quantum values under identical seeds.
-6. Revisit data-oriented layout after profile evidence.
+## Current / measured
 
-The Busy Beaver rule is intentionally excluded. HALT remains supported by the rule format, but a HALT transition should self-reincarnate rather than decrease population.
+1. **Collision lookup hot path**
+   - Baseline profile walked 48-byte `Ant` structs and spent a large fraction of samples loading candidate state.
+   - V4 uses a packed structure-of-arrays occupancy view: 32 atomic `(y<<16)|x` positions = 128 bytes, aligned to a 64-byte cache line boundary, plus a 32-bit enabled mask.
+   - Still O(N) worst-case, but scans only enabled bits with `ctz` and touches only packed positions.
+   - Re-profile before replacing the algorithm.
+
+2. **WFQ scheduler scan / mutex**
+   - Previous profile showed `scheduler_acquire()` disproportionately hot.
+   - V4 instruments `empty_scans`, `idle_waits`, granted instructions, and average executed instructions/dispatch.
+   - Determine whether cost is successful O(32) scanning, mutex serialization, or token starvation before redesigning.
+
+## Next candidates
+
+3. If packed collision scanning remains hot, evaluate a small spatial hash / bucket bitmask index. Do not add a full per-cell occupancy map unless measurements justify changing that design principle.
+4. Reduce scheduler shared-state traffic / full scans while preserving WFQ semantics.
+5. Separate single-worker throughput limits from two-worker coherency/lock contention.
+6. Revisit world-cell atomics only after collision and scheduler costs are reduced.

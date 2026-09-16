@@ -52,7 +52,7 @@ int main(void)
     ant_colony_zero(&colony);
     rng_seed(&rng, UINT32_C(0x12345678));
     for (size_t i = 0; i < 8; ++i) {
-        ant_randomize(&colony.ants[i], &world, &rng, rules_get(i % rules_count()));
+        ant_randomize(&colony.ants[i], &colony, &world, &rng, rules_get(i % rules_count()));
     }
     atomic_store(&colony.active_population, 8);
     if (scheduler_init(&scheduler, &colony, SCHED_WFQ, 32) != 0) return 2;

@@ -142,8 +142,8 @@ static void capture_one(DumpCapture *capture, const World *world, const AntColon
         out->clobbered = (flags & ANT_F_CLOBBERED) != 0;
         out->expired = (flags & ANT_F_EXPIRED) != 0;
         out->draining = (flags & ANT_F_DRAINING) != 0;
-        out->x = atomic_load_explicit(&ant->x, memory_order_relaxed);
-        out->y = atomic_load_explicit(&ant->y, memory_order_relaxed);
+        out->x = ant_position_x(colony, i);
+        out->y = ant_position_y(colony, i);
         out->heading = atomic_load_explicit(&ant->heading, memory_order_relaxed);
         out->state = atomic_load_explicit(&ant->state, memory_order_relaxed);
         out->rule_index = ant_rule_index(ant);

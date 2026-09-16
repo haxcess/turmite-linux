@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdatomic.h>
+#include <stdalign.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -35,8 +36,6 @@ typedef struct AntColony AntColony;
  * remain atomic because collision detection can inspect a running ant. */
 struct Ant {
     _Atomic uint32_t flags;
-    _Atomic uint32_t x;
-    _Atomic uint32_t y;
     _Atomic uint8_t heading;
     _Atomic uint8_t state;
     _Atomic uint16_t rule_index;
@@ -60,15 +59,25 @@ typedef struct {
 struct AntColony {
     Ant ants[TURMITE_MAX_ANTS];
     AntStats stats[TURMITE_MAX_ANTS];
+
+    /* Hot collision metadata is kept densely packed and separate from Ant.
+     * A 16-bit x plus 16-bit y supports worlds up to 65535x65535 while all
+     * 32 positions fit in 128 bytes (typically two 64-byte cache lines). */
+    alignas(64) _Atomic uint32_t positions[TURMITE_MAX_ANTS];
+    _Atomic uint32_t enabled_mask;
+
     _Atomic size_t active_population;
     _Atomic uint64_t collisions;
 };
 
 void ant_colony_zero(AntColony *colony);
-void ant_randomize(Ant *ant, const World *world, Lfsr32 *rng, const TurmiteRule *rule);
-void ant_clone(Ant *dst, const Ant *src, const World *world, Lfsr32 *rng);
+void ant_randomize(Ant *ant, AntColony *colony, const World *world, Lfsr32 *rng, const TurmiteRule *rule);
+void ant_clone(Ant *dst, AntColony *colony, const Ant *src, const World *world, Lfsr32 *rng);
 void ant_mutate_in_place(Ant *ant);
 uint16_t ant_rule_index(const Ant *ant);
+uint32_t ant_packed_position(const AntColony *colony, size_t ant_index);
+uint32_t ant_position_x(const AntColony *colony, size_t ant_index);
+uint32_t ant_position_y(const AntColony *colony, size_t ant_index);
 
 /* Execute up to quantum instructions. Returns the number actually executed. */
 size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t quantum);

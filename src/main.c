@@ -105,7 +105,7 @@ static void universe_seed(Universe *u)
     double now = mono_seconds();
     for (size_t i = 0; i < u->initial_ants; ++i) {
         Ant *ant = &u->colony.ants[i];
-        ant_randomize(ant, &u->world, &u->rng,
+        ant_randomize(ant, &u->colony, &u->world, &u->rng,
                       rules_pick(rng_uniform(&u->rng, (uint32_t)rules_count())));
     }
     atomic_store_explicit(&u->colony.active_population, u->initial_ants, memory_order_release);

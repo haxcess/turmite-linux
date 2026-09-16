@@ -4,7 +4,7 @@
 
 int world_init(World *world, int width, int height)
 {
-    if (!world || width <= 0 || height <= 0) return -1;
+    if (!world || width <= 0 || height <= 0 || width > 65535 || height > 65535) return -1;
     world->width = width;
     world->height = height;
     world->cells = (size_t)width * (size_t)height;

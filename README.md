@@ -134,3 +134,16 @@ make perf-stat
 ```
 
 The Fedora package listing confirms `perf` is available for Fedora 44.
+
+## V4 profiling notes
+
+V4 packs all 32 cross-thread ant positions into a 128-byte, cache-aligned array plus a 32-bit enabled mask. This is intended to remove the old 48-byte-stride collision scan seen in `perf report` while preserving the no-cell-occupancy-map design.
+
+The benchmark accepts optional worker-count and token-rate-scale parameters:
+
+```bash
+./tests/bench 32 256 3 1 1    # one worker, normal rates
+./tests/bench 32 256 3 1 16   # one worker, deliberately saturated token supply
+```
+
+Use the saturated run only to isolate scheduler cost; normal universe behavior still uses the original randomized per-ant token rates.

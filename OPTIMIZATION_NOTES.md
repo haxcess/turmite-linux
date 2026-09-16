@@ -39,3 +39,11 @@ The ant context was reduced from 72 bytes to 48 bytes by moving scheduler-only t
 The executor now accepts a scheduler-granted instruction count, allowing the inner loop to avoid loading the token balance on every instruction. State/heading publication and instruction accounting happen once per quantum.
 
 The token accrual math was simplified to one 64-bit division after clamping elapsed time to one second.
+
+## V4: packed collision view and scheduler starvation instrumentation
+
+The baseline perf profile showed collision detection walking full `Ant` structures. V4 removes x/y from `Ant` and publishes each read head into a 32-entry atomic packed-position array. Each entry is `(y << 16) | x`, so the full collision coordinate set is 128 bytes. An enabled bitmask skips inactive ants using `ctz` iteration.
+
+A profile-only scheduler token-rate multiplier was added to distinguish token fragmentation from scheduler implementation cost. It applies during token accrual, so clobber/mutation cannot silently reset the experiment.
+
+Local results (environment-dependent) showed normal rates producing only a few instructions per successful dispatch, with zero empty scans. At 16x token rate, grants approached the requested 256-instruction quantum. This means the next scheduler optimization should consider batching/minimum service quanta or another WFQ-friendly mechanism rather than assuming the 1 ms timed wait is the dominant cost.

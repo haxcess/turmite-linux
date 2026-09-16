@@ -17,7 +17,7 @@ SRC := \
 OBJ := $(SRC:.c=.o)
 TARGET := turmite
 
-.PHONY: all clean core-test tsan-test struct-report bench perf-stat perf-record perf-report
+.PHONY: all clean core-test tsan-test struct-report bench perf-stat perf-stat-1w perf-stat-saturated perf-record perf-record-1w perf-record-saturated perf-report
 
 all: $(TARGET)
 
@@ -33,11 +33,23 @@ bench: tests/bench
 	./tests/bench 32 256 3
 
 perf-stat: tests/bench
-	perf stat -d -r 5 ./tests/bench 32 256 3
+	perf stat -d -r 5 ./tests/bench 32 256 3 2 1
+
+perf-stat-1w: tests/bench
+	perf stat -d -r 5 ./tests/bench 32 256 3 1 1
+
+perf-stat-saturated: tests/bench
+	perf stat -d -r 5 ./tests/bench 32 256 3 1 16
 
 
 perf-record: tests/bench
-	perf record -g -o perf.data -- ./tests/bench 32 256 10
+	perf record -g -o perf.data -- ./tests/bench 32 256 10 2 1
+
+perf-record-1w: tests/bench
+	perf record -g -o perf-1w.data -- ./tests/bench 32 256 10 1 1
+
+perf-record-saturated: tests/bench
+	perf record -g -o perf-saturated.data -- ./tests/bench 32 256 10 1 16
 
 perf-report: perf.data
 	perf report -i perf.data
