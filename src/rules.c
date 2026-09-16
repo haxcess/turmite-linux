@@ -43,14 +43,6 @@ static const TurmiteRule RULES[] = {
             { A(1,TURN_L,0), A(2,TURN_R,0), A(3,TURN_R,0), A(4,TURN_R,0), A(5,TURN_R,0), A(0,TURN_R,0) }
         }
     },
-    // {
-    //     "busybeaver3", "Busy Beaver (3-state)", 3, 2,
-    //     {
-    //         { A(1,TURN_E,1), A(1,TURN_W,2) },
-    //         { A(1,TURN_W,0), A(1,TURN_E,1) },
-    //         { A(1,TURN_W,1), HLT(1,TURN_E,0) }
-    //     }
-    // },
     {
         "builders", "Builders", 2, 2,
         {

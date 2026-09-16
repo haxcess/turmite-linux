@@ -17,7 +17,7 @@ SRC := \
 OBJ := $(SRC:.c=.o)
 TARGET := turmite
 
-.PHONY: all clean
+.PHONY: all clean core-test tsan-test struct-report bench perf-stat perf-record perf-report
 
 all: $(TARGET)
 
@@ -35,13 +35,18 @@ bench: tests/bench
 perf-stat: tests/bench
 	perf stat -d -r 5 ./tests/bench 32 256 3
 
+
+perf-record: tests/bench
+	perf record -g -o perf.data -- ./tests/bench 32 256 10
+
+perf-report: perf.data
+	perf report -i perf.data
+
 tests/bench: tests/bench.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c
 	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $^ -pthread -lm -o $@
 
 clean:
 	rm -f $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench
-
-.PHONY: core-test tsan-test struct-report bench perf-stat
 
 core-test: tests/headless_smoke
 	./tests/headless_smoke

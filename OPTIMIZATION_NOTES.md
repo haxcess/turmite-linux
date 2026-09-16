@@ -32,7 +32,7 @@ Do not replace the world array with a packed 3-bit representation merely for mem
 
 ## Second pass
 
-The second pass fixes an unintended population-loss bug: HALT rules no longer decrement the active population. The Busy Beaver rule contains a HALT transition, so the previous implementation could silently shrink the colony without a requested population reduction.
+The second pass fixes an unintended population-loss bug: HALT rules no longer decrement the active population. Rules containing HALT transitions are handled as self-reincarnation rather than population death.
 
 The ant context was reduced from 72 bytes to 48 bytes by moving scheduler-only timestamps and cold diagnostic counters out of the hot structure. Scheduler timestamps are stored in `Scheduler.last_token_us[]`; instruction/mutation counters are stored in `AntColony.stats[]`.
 

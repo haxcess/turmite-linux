@@ -23,7 +23,7 @@ This keeps the execution context small enough that the fixed maximum of 32 ants 
 
 ## HALT semantics
 
-A built-in rule may contain a `HALT` action (Busy Beaver currently does). HALT now means the ant becomes non-runnable but remains part of the population. Population decreases only through explicit halving/drain pressure. This keeps the population setpoint stable.
+A built-in rule may contain a `HALT` action HALT now means the ant becomes non-runnable but remains part of the population. Population decreases only through explicit halving/drain pressure. This keeps the population setpoint stable.
 
 A universe with enough HALTED ants can still become computationally quiescent; the five-minute lifecycle remains the intended stale-universe escape hatch.
 
