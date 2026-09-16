@@ -30,7 +30,7 @@ int renderer_display_size(int display_index, int *width, int *height);
 int renderer_init(Renderer *renderer, int width, int height, int cell_size,
                   bool hud_visible, int display_index, bool fullscreen);
 void renderer_destroy(Renderer *renderer);
-void renderer_render(Renderer *renderer, const World *world, const AntColony *colony,
+void renderer_render(Renderer *renderer, World *world, const AntColony *colony,
                      const Scheduler *scheduler, size_t workers, uint32_t seed, double universe_age,
                      uint64_t total_collisions, bool paused);
 void renderer_handle_resize(Renderer *renderer, int width, int height);
