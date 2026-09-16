@@ -88,27 +88,71 @@ static void draw_text(SDL_Renderer *r, int x, int y, const char *text, int scale
     }
 }
 
-int renderer_init(Renderer *renderer, int width, int height, int cell_size, bool hud_visible)
+static int ensure_sdl_video(void)
+{
+    if (SDL_WasInit(SDL_INIT_VIDEO) != 0) return 0;
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
+        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        return -1;
+    }
+    return 0;
+}
+
+int renderer_display_size(int display_index, int *width, int *height)
+{
+    if (!width || !height || display_index < 0) return -1;
+    if (ensure_sdl_video() != 0) return -1;
+
+    const int count = SDL_GetNumVideoDisplays();
+    if (display_index >= count) {
+        fprintf(stderr, "display %d does not exist (SDL reports %d display%s)\n",
+                display_index, count, count == 1 ? "" : "s");
+        return -1;
+    }
+
+    SDL_Rect bounds;
+    if (SDL_GetDisplayBounds(display_index, &bounds) != 0) {
+        fprintf(stderr, "SDL_GetDisplayBounds(%d) failed: %s\n",
+                display_index, SDL_GetError());
+        return -1;
+    }
+
+    *width = bounds.w;
+    *height = bounds.h;
+    return 0;
+}
+
+int renderer_init(Renderer *renderer, int width, int height, int cell_size,
+                  bool hud_visible, int display_index, bool fullscreen)
 {
     memset(renderer, 0, sizeof(*renderer));
     renderer->width = width;
     renderer->height = height;
     renderer->cell_size = cell_size;
+    renderer->display_index = display_index;
+    renderer->fullscreen = fullscreen;
     renderer->hud_visible = hud_visible;
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
-        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+    if (ensure_sdl_video() != 0) return -1;
+
+    const int x = fullscreen ? SDL_WINDOWPOS_UNDEFINED_DISPLAY(display_index)
+                             : SDL_WINDOWPOS_CENTERED_DISPLAY(display_index);
+    const int y = fullscreen ? SDL_WINDOWPOS_UNDEFINED_DISPLAY(display_index)
+                             : SDL_WINDOWPOS_CENTERED_DISPLAY(display_index);
+    const Uint32 flags = SDL_WINDOW_SHOWN |
+                         (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0u);
+
+    renderer->window = SDL_CreateWindow("Turmite Universe", x, y, width, height, flags);
+    if (!renderer->window) {
+        fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         return -1;
     }
 
-    renderer->window = SDL_CreateWindow(
-        "Turmite Universe", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        width, height, SDL_WINDOW_SHOWN);
-    if (!renderer->window) return -1;
-
-    renderer->renderer = SDL_CreateRenderer(renderer->window, -1,
-        SDL_RENDERER_ACCELERATED);
-    if (!renderer->renderer) return -1;
+    renderer->renderer = SDL_CreateRenderer(renderer->window, -1, SDL_RENDERER_ACCELERATED);
+    if (!renderer->renderer) {
+        fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
+        return -1;
+    }
 
     SDL_SetRenderDrawBlendMode(renderer->renderer, SDL_BLENDMODE_BLEND);
     renderer->pixels = malloc((size_t)(width / cell_size) * (size_t)(height / cell_size) * sizeof(uint32_t));
