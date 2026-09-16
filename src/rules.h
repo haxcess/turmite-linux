@@ -9,7 +9,12 @@
 #define TURMITE_MAX_STATES 4
 #define TURMITE_MAX_RULES 64
 
-/* Turn codes mirror the supplied browser rule language. */
+/* A rule is a tiny table-driven state machine. The current internal state and
+ * tape color select one RuleAction: write a color, turn/set heading, enter a
+ * new state, and optionally halt. */
+
+/* Turn codes mirror the supplied browser rule language. F/R/L/B are relative,
+ * H holds position, and N/E/S/W set an absolute heading. */
 typedef enum {
     TURN_F = 0,
     TURN_R,
