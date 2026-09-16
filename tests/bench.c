@@ -31,7 +31,8 @@ int main(int argc, char **argv) {
     double seconds = argc > 3 ? strtod(argv[3], NULL) : 3.0;
     size_t workers = argc > 4 ? (size_t)strtoul(argv[4], NULL, 0) : 2;
     uint32_t rate_scale = argc > 5 ? (uint32_t)strtoul(argv[5], NULL, 0) : 1u;
-    if (!(ants == 2 || ants == 4 || ants == 8 || ants == 16 || ants == 32) || quantum == 0 || seconds <= 0 || workers == 0 || workers > BENCH_MAX_WORKERS || rate_scale == 0) return 2;
+    size_t min_service = argc > 6 ? (size_t)strtoul(argv[6], NULL, 0) : 16u;
+    if (!(ants == 2 || ants == 4 || ants == 8 || ants == 16 || ants == 32) || quantum == 0 || seconds <= 0 || workers == 0 || workers > BENCH_MAX_WORKERS || rate_scale == 0 || min_service == 0) return 2;
     World world; AntColony colony; Scheduler scheduler; Lfsr32 rng;
     if (world_init(&world, 300, 200) != 0) return 1;
     if (ant_colony_init(&colony, &world) != 0) return 1;
@@ -42,6 +43,7 @@ int main(int argc, char **argv) {
     atomic_store(&colony.active_population, ants);
     if (scheduler_init(&scheduler, &colony, SCHED_WFQ, quantum) != 0) return 1;
     scheduler_set_token_rate_scale(&scheduler, rate_scale);
+    scheduler_set_min_service(&scheduler, min_service);
     _Atomic bool stop = false; pthread_t threads[BENCH_MAX_WORKERS]; Worker w = { &scheduler, &colony, &world, &stop };
     for (size_t i = 0; i < workers; ++i) pthread_create(&threads[i], NULL, run, &w);
     struct timespec ts = { (time_t)seconds, (long)((seconds - (time_t)seconds) * 1e9) };
@@ -53,8 +55,8 @@ int main(int argc, char **argv) {
     const uint64_t granted = scheduler_get_granted_instructions(&scheduler);
     const uint64_t empty_scans = scheduler_get_empty_scans(&scheduler);
     const uint64_t idle_waits = scheduler_get_idle_waits(&scheduler);
-    printf("ants=%zu workers=%zu quantum=%zu rate_scale=%u seconds=%.3f instructions=%llu dispatches=%llu avg_exec_per_dispatch=%.2f avg_grant=%.2f empty_scans=%llu idle_waits=%llu collisions=%llu population=%zu\n",
-           ants, workers, quantum, rate_scale, seconds,
+    printf("ants=%zu workers=%zu quantum=%zu min_service=%zu rate_scale=%u seconds=%.3f instructions=%llu dispatches=%llu avg_exec_per_dispatch=%.2f avg_grant=%.2f empty_scans=%llu idle_waits=%llu collisions=%llu population=%zu\n",
+           ants, workers, quantum, min_service, rate_scale, seconds,
            (unsigned long long)instructions, (unsigned long long)dispatches,
            dispatches ? (double)instructions / (double)dispatches : 0.0,
            dispatches ? (double)granted / (double)dispatches : 0.0,

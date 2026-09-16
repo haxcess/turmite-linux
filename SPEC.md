@@ -46,3 +46,9 @@ A small embedded-oriented computational artwork in which logical turmites (ants)
 - Better population pressure/drop semantics.
 - Exact e-paper refresh behavior.
 - MCU/display selection.
+
+## V6 execution batching clarification
+
+`quantum` remains the maximum number of instructions in one dispatch. `min_service` is a scheduler batching threshold: a normal ant is not dispatched until it has at least `min(min_service, quantum)` whole tokens available. This does not create tokens or alter the ant's configured token generation rate; it only changes burst size. Draining ants bypass the threshold so population reduction can consume their remaining token budget.
+
+During a worker lease, the atomic occupancy index is the authoritative read-head residency structure. Packed ant positions are published at dispatch boundaries for debugging, dump capture, cloning/reincarnation, and cold-path observation; they are not consulted by the normal collision hot path.

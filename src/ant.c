@@ -342,42 +342,36 @@ static bool move_claim(Ant *self, AntColony *colony,
                                                       memory_order_relaxed);
     }
 
-    publish_position(colony, self_index, new_x, new_y);
-
+    /* occupancy[] is the authoritative cross-thread residency index while an
+     * ant is leased. positions[] is a cold published snapshot and is updated
+     * once at the quantum boundary, not on every move.
+     *
+     * The normal empty-cell path is one CAS: expected starts at EMPTY and is
+     * overwritten with the current owner if the claim fails, avoiding a
+     * separate load before every move. */
     for (;;) {
-        uint8_t owner = atomic_load_explicit(&colony->occupancy[new_cell], memory_order_relaxed);
+        uint8_t owner = 0;
+        if (atomic_compare_exchange_weak_explicit(&colony->occupancy[new_cell], &owner, self_id,
+                                                  memory_order_acq_rel,
+                                                  memory_order_relaxed))
+            return true;
+
         if (owner == self_id) return true;
-        if (owner == 0) {
-            uint8_t expected = 0;
-            if (atomic_compare_exchange_weak_explicit(&colony->occupancy[new_cell], &expected, self_id,
-                                                      memory_order_acq_rel,
-                                                      memory_order_relaxed))
-                return true;
-            continue;
-        }
 
         const size_t other_index = (size_t)(owner - 1u);
-        if (other_index >= TURMITE_MAX_ANTS) {
-            uint8_t expected = owner;
-            (void)atomic_compare_exchange_weak_explicit(&colony->occupancy[new_cell], &expected, 0,
-                                                        memory_order_acq_rel,
-                                                        memory_order_relaxed);
+        if (owner == 0 || other_index >= TURMITE_MAX_ANTS) {
+            /* A spurious weak-CAS failure (owner==0) or impossible/corrupt
+             * owner byte simply retries the direct claim. */
+            if (owner != 0) {
+                uint8_t expected = owner;
+                (void)atomic_compare_exchange_weak_explicit(&colony->occupancy[new_cell], &expected, 0,
+                                                            memory_order_acq_rel,
+                                                            memory_order_relaxed);
+            }
             continue;
         }
 
         Ant *other = &colony->ants[other_index];
-        const uint32_t other_flags = flags_load(other);
-        const uint32_t other_pos = atomic_load_explicit(&colony->positions[other_index], memory_order_relaxed);
-        if (!(other_flags & ANT_F_ENABLED) || other_pos != pack_position(new_x, new_y)) {
-            /* Stale derived index entry. Replace it without creating a collision. */
-            uint8_t expected = owner;
-            if (atomic_compare_exchange_weak_explicit(&colony->occupancy[new_cell], &expected, self_id,
-                                                      memory_order_acq_rel,
-                                                      memory_order_relaxed))
-                return true;
-            continue;
-        }
-
         const uint32_t self_health = atomic_load_explicit(&self->tokens_fp, memory_order_relaxed);
         const uint32_t other_health = atomic_load_explicit(&other->tokens_fp, memory_order_relaxed);
         const bool self_wins = self_health > other_health ||
@@ -463,6 +457,9 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
         ++executed;
     }
 
+    /* Publish the externally observed position once per dispatch. During the
+     * quantum occupancy[] is the authoritative residency structure. */
+    publish_position(colony, self_index, x, y);
     atomic_store_explicit(&ant->state, state, memory_order_relaxed);
     atomic_store_explicit(&ant->heading, heading, memory_order_relaxed);
     return executed;

@@ -56,3 +56,21 @@ The O(32) packed-position collision scan has been replaced by a world-sized, der
 Moves clear the source with a conditional CAS and claim the destination with CAS. Contention directly identifies the resident ant in O(1), after which token health decides the winner. The loser is marked CLOBBERED|DISPLACED and cannot reincarnate until it atomically reclaims its recorded position after the winner leaves. This preserves the read-head exclusivity/escape-time model without scanning the colony.
 
 For a 300x200 world the occupancy index costs 60,000 bytes. The six-color tape remains independent relaxed atomic memory.
+
+## V6: quantum-boundary position publication + dispatch batching
+
+V6 continues the V5 O(1) occupancy-index work:
+
+- `occupancy[]` is the authoritative cross-thread read-head residency index while an ant is leased.
+- `positions[32]` is now a cold published snapshot. A worker writes its packed `(x,y)` once at the end of a dispatch instead of once per move.
+- The normal destination-empty path uses one CAS with `expected=0`; on failure the compare-exchange result also supplies the resident ant ID.
+- The old normal-path validation of an occupancy entry against `flags` + `positions[]` is removed.
+- WFQ gains `min_service`: an ant normally waits until it has accumulated a useful batch of whole tokens. This does not change token generation rate; it changes burst size. Draining ants bypass the threshold so population halving still completes.
+
+Local one-worker measurements (same container, 32 ants, quantum 256, 3 seconds) showed:
+
+- unbatched normal (`min_service=1`): about 19M instructions, ~2.5 instructions/dispatch
+- batched normal (`min_service=16`): about 76M instructions, ~52 instructions/dispatch
+- saturated (`rate_scale=16`, `min_service=16`): about 94M instructions, ~229 instructions/dispatch
+
+These are directional measurements only; Fedora `perf` remains the authoritative profile for the user's machine.

@@ -130,6 +130,7 @@ static void capture_one(DumpCapture *capture, const World *world, const AntColon
     meta->rng_state = rng ? atomic_load_explicit(&rng->state, memory_order_relaxed) : 0;
     meta->active_population = (uint32_t)atomic_load_explicit(&colony->active_population, memory_order_relaxed);
     meta->quantum = (uint32_t)scheduler_get_quantum((Scheduler *)scheduler);
+    meta->min_service = (uint32_t)scheduler_get_min_service((Scheduler *)scheduler);
 
     DumpAntMeta *ants = capture->ant_meta + slot * capture->ant_slots;
     pthread_mutex_lock((pthread_mutex_t *)&scheduler->lock);
@@ -246,20 +247,21 @@ int dump_write(const DumpCapture *capture, const World *world, const AntColony *
     fprintf(manifest, "workers=%zu\n", workers);
     fprintf(manifest, "scheduler=WFQ\n");
     fprintf(manifest, "quantum=%zu\n", quantum);
+    fprintf(manifest, "min_service=%zu\n", scheduler_get_min_service(scheduler));
     fprintf(manifest, "lifetime_minutes=%.6f\n", lifetime_minutes);
     fprintf(manifest, "capture_interval_seconds=%.6f\n", capture->interval_seconds);
     fprintf(manifest, "requested_pages=%zu\n", capture->page_capacity);
     fprintf(manifest, "captured_pages=%zu\n", capture->page_count);
     fprintf(manifest, "\nPAGE TABLE\n");
-    fprintf(manifest, "page\tage_seconds\tworld_hash_hex\tchanged_cells\tcollisions\tdispatches\tinstructions\trng_state_hex\tactive_population\tquantum\n");
+    fprintf(manifest, "page\tage_seconds\tworld_hash_hex\tchanged_cells\tcollisions\tdispatches\tinstructions\trng_state_hex\tactive_population\tquantum\tmin_service\n");
 
     for (size_t ordinal = 0; ordinal < capture->page_count; ++ordinal) {
         size_t slot = chronological_slot(capture, ordinal);
         const DumpPageMeta *meta = &capture->page_meta[slot];
-        fprintf(manifest, "%04zu\t%.6f\t%016" PRIX64 "\t%" PRIu32 "\t%" PRIu64 "\t%" PRIu64 "\t%" PRIu64 "\t%08" PRIX32 "\t%" PRIu32 "\t%" PRIu32 "\n",
+        fprintf(manifest, "%04zu\t%.6f\t%016" PRIX64 "\t%" PRIu32 "\t%" PRIu64 "\t%" PRIu64 "\t%" PRIu64 "\t%08" PRIX32 "\t%" PRIu32 "\t%" PRIu32 "\t%" PRIu32 "\n",
                 ordinal, meta->age, meta->world_hash, meta->changed_cells,
                 meta->collisions, meta->dispatches, meta->total_instructions,
-                meta->rng_state, meta->active_population, meta->quantum);
+                meta->rng_state, meta->active_population, meta->quantum, meta->min_service);
     }
 
     fprintf(manifest, "\nANT SNAPSHOTS\n");

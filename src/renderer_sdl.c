@@ -156,7 +156,9 @@ void renderer_render(Renderer *renderer, const World *world, const AntColony *co
         char line[128];
         snprintf(line, sizeof(line), "ANTS %zu / 32", atomic_load_explicit(&colony->active_population, memory_order_relaxed));
         draw_text(renderer->renderer, 24, 22, line, 2);
-        snprintf(line, sizeof(line), "WORKERS %zu  Q %zu", workers, scheduler_get_quantum((Scheduler *)scheduler));
+        snprintf(line, sizeof(line), "WORKERS %zu  Q %zu  MIN %zu", workers,
+                 scheduler_get_quantum((Scheduler *)scheduler),
+                 scheduler_get_min_service((Scheduler *)scheduler));
         draw_text(renderer->renderer, 24, 42, line, 2);
         snprintf(line, sizeof(line), "WFQ  AGE %05.1F", universe_age);
         draw_text(renderer->renderer, 24, 62, line, 2);

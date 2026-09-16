@@ -24,6 +24,7 @@
 #define DEFAULT_WORKERS 2
 #define DEFAULT_ANTS 8
 #define DEFAULT_QUANTUM 32
+#define DEFAULT_MIN_SERVICE 16
 #define DEFAULT_MINUTES 5.0
 #define MIN_QUANTUM 1
 #define MAX_QUANTUM 4096
@@ -59,6 +60,7 @@ typedef struct {
     size_t workers;
     size_t initial_ants;
     size_t quantum;
+    size_t min_service;
     double lifetime_minutes;
     size_t dump_pages;
     double dump_interval;
@@ -135,6 +137,7 @@ static int universe_init(Universe *u, uint32_t seed)
         world_destroy(&u->world);
         return -1;
     }
+    scheduler_set_min_service(&u->scheduler, u->min_service);
 
     if (dump_capture_init(&u->dump, &u->world, u->seed, u->dump_pages,
                           u->dump_interval, u->started_at) != 0) {
@@ -226,7 +229,8 @@ static void usage(const char *prog)
     printf("Usage: %s [options]\n", prog);
     printf("  --seed HEX         deterministic universe seed\n");
     printf("  --ants N            2,4,8,16,32\n");
-    printf("  --quantum N         instructions per dispatch (1..4096)\n");
+    printf("  --quantum N         maximum instructions per dispatch (1..4096)\n");
+    printf("  --min-service N     minimum normal dispatch batch (default 16)\n");
     printf("  --workers N         Linux worker pthreads (default 2)\n");
     printf("  --width N            window width (multiple of 4)\n");
     printf("  --height N           window height (multiple of 4)\n");
@@ -297,7 +301,7 @@ static void handle_key(Universe *u, SDL_Keycode key)
     if (key == SDLK_EQUALS || key == SDLK_KP_PLUS) {
         size_t current = scheduler_active_population(&u->scheduler);
         if (current < TURMITE_MAX_ANTS) {
-            (void)scheduler_double_population(&u->scheduler, &u->world, &u->rng, mono_seconds());
+            (void)scheduler_double_population(&u->scheduler, &u->world, &u->rng, mono_microseconds());
         }
         return;
     }
@@ -422,6 +426,7 @@ int main(int argc, char **argv)
 {
     size_t ants = DEFAULT_ANTS;
     size_t quantum = DEFAULT_QUANTUM;
+    size_t min_service = DEFAULT_MIN_SERVICE;
     size_t workers = DEFAULT_WORKERS;
     size_t width = DEFAULT_WIDTH;
     size_t height = DEFAULT_HEIGHT;
@@ -438,6 +443,7 @@ int main(int argc, char **argv)
         {"seed", required_argument, NULL, 's'},
         {"ants", required_argument, NULL, 'a'},
         {"quantum", required_argument, NULL, 'q'},
+        {"min-service", required_argument, NULL, 'b'},
         {"workers", required_argument, NULL, 'w'},
         {"width", required_argument, NULL, 'x'},
         {"height", required_argument, NULL, 'y'},
@@ -452,12 +458,13 @@ int main(int argc, char **argv)
     };
 
     for (;;) {
-        int c = getopt_long(argc, argv, "s:a:q:w:x:y:m:d:i:D:nHh", opts, NULL);
+        int c = getopt_long(argc, argv, "s:a:q:b:w:x:y:m:d:i:D:nHh", opts, NULL);
         if (c == -1) break;
         switch (c) {
             case 's': if (!parse_seed(optarg, &explicit_seed)) { fprintf(stderr, "bad --seed\n"); return 2; } has_seed = true; break;
             case 'a': if (!parse_uint(optarg, &ants) || !valid_population(ants)) { fprintf(stderr, "--ants must be 2,4,8,16,32\n"); return 2; } break;
             case 'q': if (!parse_uint(optarg, &quantum) || quantum < MIN_QUANTUM || quantum > MAX_QUANTUM) { fprintf(stderr, "bad --quantum\n"); return 2; } break;
+            case 'b': if (!parse_uint(optarg, &min_service) || min_service < 1 || min_service > MAX_QUANTUM) { fprintf(stderr, "bad --min-service\n"); return 2; } break;
             case 'w': if (!parse_uint(optarg, &workers) || workers > 8) { fprintf(stderr, "--workers must be 1..8\n"); return 2; } break;
             case 'x': if (!parse_uint(optarg, &width)) { fprintf(stderr, "bad --width\n"); return 2; } break;
             case 'y': if (!parse_uint(optarg, &height)) { fprintf(stderr, "bad --height\n"); return 2; } break;
@@ -486,6 +493,7 @@ int main(int argc, char **argv)
     u.workers = workers;
     u.initial_ants = ants;
     u.quantum = quantum;
+    u.min_service = min_service;
     u.lifetime_minutes = minutes;
     u.dump_pages = dump_pages;
     u.dump_interval = dump_interval;
@@ -510,6 +518,7 @@ int main(int argc, char **argv)
             universe_seed(&u);
             scheduler_destroy(&u.scheduler);
             if (scheduler_init(&u.scheduler, &u.colony, SCHED_WFQ, u.quantum) != 0) break;
+            scheduler_set_min_service(&u.scheduler, u.min_service);
         }
         if (u.quit) break;
     }

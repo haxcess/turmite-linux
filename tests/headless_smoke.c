@@ -56,6 +56,7 @@ int main(void)
     }
     atomic_store(&colony.active_population, 8);
     if (scheduler_init(&scheduler, &colony, SCHED_WFQ, 32) != 0) return 2;
+    scheduler_set_min_service(&scheduler, 16);
 
     atomic_store(&stop_flag, false);
     worker.scheduler = &scheduler;

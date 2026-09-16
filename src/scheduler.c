@@ -111,7 +111,20 @@ Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us, size_t *granted_qu
             accrue_tokens(scheduler, i, ant, now_us);
             retire_draining(ant, scheduler->colony);
             if (!runnable(ant)) continue;
-            if (atomic_load_explicit(&ant->tokens_fp, memory_order_relaxed) < TOKEN_FP_ONE) continue;
+
+            const uint32_t tokens_fp = atomic_load_explicit(&ant->tokens_fp, memory_order_relaxed);
+            const uint32_t whole_tokens = tokens_fp >> TOKEN_FP_SHIFT;
+            if (whole_tokens == 0) continue;
+
+            /* Batch normal service so low token rates do not turn into millions
+             * of 1-3 instruction dispatches. This changes burstiness, not the
+             * long-term token rate. Draining ants bypass batching so halving can
+             * consume their final tokens and complete. */
+            const size_t q = atomic_load_explicit(&scheduler->quantum, memory_order_relaxed);
+            size_t required = atomic_load_explicit(&scheduler->min_service, memory_order_relaxed);
+            if (required == 0) required = 1;
+            if (required > q) required = q;
+            if (!(f & ANT_F_DRAINING) && whole_tokens < required) continue;
 
             uint32_t weight = atomic_load_explicit(&ant->weight, memory_order_relaxed);
             if (weight == 0) weight = 1;
@@ -211,9 +224,20 @@ void scheduler_set_quantum(Scheduler *scheduler, size_t quantum)
     scheduler_wake_all(scheduler);
 }
 
+void scheduler_set_min_service(Scheduler *scheduler, size_t min_service)
+{
+    atomic_store_explicit(&scheduler->min_service, min_service ? min_service : 1u, memory_order_release);
+    scheduler_wake_all(scheduler);
+}
+
 size_t scheduler_get_quantum(const Scheduler *scheduler)
 {
     return scheduler ? atomic_load_explicit(&scheduler->quantum, memory_order_relaxed) : 1u;
+}
+
+size_t scheduler_get_min_service(const Scheduler *scheduler)
+{
+    return scheduler ? atomic_load_explicit(&scheduler->min_service, memory_order_relaxed) : 1u;
 }
 
 void scheduler_wake_all(Scheduler *scheduler)
@@ -258,6 +282,7 @@ int scheduler_init(Scheduler *scheduler, AntColony *colony, SchedulerPolicy poli
     atomic_init(&scheduler->granted_instructions, 0);
     atomic_init(&scheduler->paused, false);
     atomic_init(&scheduler->quantum, quantum ? quantum : 1u);
+    atomic_init(&scheduler->min_service, 1u);
     atomic_init(&scheduler->token_rate_scale, 1u);
     const uint64_t now_us = monotonic_us();
     for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {

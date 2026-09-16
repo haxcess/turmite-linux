@@ -66,7 +66,7 @@ The scheduler policy is currently fixed to weighted-fair scheduling. Its selecti
 
 The scheduler protects ant ownership and dispatch state. The world does not have cell locks. World cells are C atomics so the program stays within the C memory model while still permitting independent read/compute/write races. A turmite's three-step transition is not a transaction.
 
-Ant positions are atomic too, because workers may inspect them during collision detection. There is deliberately no occupancy map. Collision discovery is therefore a concurrent observation of the ant contexts and may be timing-sensitive.
+Read-head exclusivity uses a derived atomic occupancy index: one byte per logical world cell stores empty or ant-id+1. World color memory remains independent and intentionally racy. Packed ant positions are published snapshots for debugging/reincarnation, not the collision-search hot path.
 
 This is a reference experiment, not a deterministic cellular-automaton simulator. The same seed and configuration can still diverge because Linux scheduling and thread interleaving are outside the machine's control.
 
@@ -159,3 +159,24 @@ Use the existing profiling targets to compare against V4:
     make perf-record-1w
     make perf-record-saturated
 
+
+
+## V6 scheduling / hot-path optimization
+
+V6 removes the per-move `positions[]` store from the instruction loop. During a lease, `occupancy[]` is the authoritative read-head residency index; packed positions are published once at the quantum boundary. The common empty-destination move is attempted directly with one CAS, and a failed CAS returns the resident id for collision health comparison.
+
+Normal WFQ service now supports a minimum batch threshold without changing long-term token generation rates:
+
+    ./turmite --quantum 256 --min-service 16
+
+`--min-service 1` reproduces the old unbatched behavior. Draining ants bypass the threshold so halving can still complete. Useful profile comparisons are:
+
+    make perf-record-unbatched
+    make perf-record-1w
+    make perf-record-saturated
+
+The benchmark's final positional argument is the minimum service batch:
+
+    ./tests/bench 32 256 3 1 1 1    # normal rate, unbatched
+    ./tests/bench 32 256 3 1 1 16   # normal rate, batched
+    ./tests/bench 32 256 3 1 16 16  # saturated token supply

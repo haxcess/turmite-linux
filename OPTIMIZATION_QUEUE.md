@@ -30,3 +30,21 @@
 1. Profile V5 saturated and normal token-rate runs against the V4 baseline.
 2. If scheduler dominates normal-rate runs, prototype minimum-service batching without changing long-term token rates.
 3. Revisit world-cell atomic/interpreter costs only after the above.
+
+## V6 status
+
+Completed:
+
+- [x] Replace O(32) collision discovery with O(1) occupancy index (V5).
+- [x] Remove per-move publication to `positions[]`; publish once per dispatch.
+- [x] Trust occupancy ownership on the normal collision path; remove flags/position re-validation.
+- [x] Collapse empty-destination load+claim into a single CAS-first path.
+- [x] Add configurable minimum-service batching without changing long-term token rates.
+
+Next profiling gates:
+
+1. Compare V6 `perf-record-unbatched` vs `perf-record-1w` to isolate batching cost/benefit.
+2. Compare V6 `perf-record-saturated` against V5 saturated to identify the new movement hotspot.
+3. If displaced-ant reclamation remains visible, replace scheduler-wide reclaim polling with an event/list mechanism.
+4. Profile world-cell relaxed atomics.
+5. Only then micro-optimize rule interpretation / turn logic.

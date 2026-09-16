@@ -27,6 +27,7 @@ typedef struct {
     double fair_credit[TURMITE_MAX_ANTS];
     uint64_t last_token_us[TURMITE_MAX_ANTS];
     _Atomic size_t quantum;
+    _Atomic size_t min_service;
     _Atomic uint32_t token_rate_scale;
 } Scheduler;
 
@@ -35,8 +36,10 @@ void scheduler_destroy(Scheduler *scheduler);
 Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us, size_t *granted_quantum);
 void scheduler_release(Scheduler *scheduler, Ant *ant, size_t executed, uint64_t now_us);
 void scheduler_set_quantum(Scheduler *scheduler, size_t quantum);
+void scheduler_set_min_service(Scheduler *scheduler, size_t min_service);
 void scheduler_set_token_rate_scale(Scheduler *scheduler, uint32_t scale);
 size_t scheduler_get_quantum(const Scheduler *scheduler);
+size_t scheduler_get_min_service(const Scheduler *scheduler);
 uint64_t scheduler_get_dispatches(const Scheduler *scheduler);
 uint64_t scheduler_get_empty_scans(const Scheduler *scheduler);
 uint64_t scheduler_get_idle_waits(const Scheduler *scheduler);

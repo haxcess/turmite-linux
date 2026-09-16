@@ -19,6 +19,7 @@ typedef struct {
     uint32_t rng_state;
     uint32_t active_population;
     uint32_t quantum;
+    uint32_t min_service;
 } DumpPageMeta;
 
 typedef struct {
