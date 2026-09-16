@@ -3,6 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Ant execution is intentionally split into two kinds of shared state:
+ *   - tape colors are relaxed last-writer-wins memory;
+ *   - occupancy[] enforces one resident read-head per cell and resolves contact.
+ * A worker keeps position/heading/state local for a quantum and publishes the
+ * cold snapshot once the burst ends. */
+
 static const int DX[4] = {0, 1, 0, -1};
 static const int DY[4] = {-1, 0, 1, 0};
 
@@ -36,6 +42,8 @@ static inline size_t occupancy_index(const AntColony *colony, uint32_t x, uint32
     return (size_t)y * (size_t)colony->occupancy_width + x;
 }
 
+/* Each ant owns a private Galois LFSR, avoiding contention on the universe RNG
+ * during mutation and lifecycle operations. */
 static uint32_t ant_rng_next(uint32_t *state)
 {
     uint32_t x = *state;
@@ -53,6 +61,9 @@ static uint32_t ant_rng_uniform(uint32_t *state, uint32_t limit)
     return ant_rng_next(state) % limit;
 }
 
+/* Scheduler parameters are part of the ant's mutable phenotype: rate controls
+ * long-term instruction supply, capacity controls burst size, and weight
+ * controls relative WFQ service. */
 static uint32_t random_rate(uint32_t *state)
 {
     return 50000u + ant_rng_uniform(state, 1950001u);
@@ -78,6 +89,7 @@ static void reset_schedule(Ant *ant, uint32_t *state)
     atomic_store_explicit(&ant->weight, random_weight(state), memory_order_relaxed);
 }
 
+/* Convert relative/absolute rule turns into the four internal compass headings. */
 static uint8_t apply_turn(uint8_t heading, TurnCode turn)
 {
     switch (turn) {
@@ -103,6 +115,8 @@ static inline void publish_position(AntColony *colony, size_t index, uint32_t x,
     atomic_store_explicit(&colony->positions[index], pack_position(x, y), memory_order_relaxed);
 }
 
+/* Initial placement probes random cells until it can atomically claim an empty
+ * occupancy byte. Normal-sized worlds make exhaustion effectively impossible. */
 static bool claim_random_empty_position(AntColony *colony, const World *world,
                                         size_t ant_index, uint32_t *rng_state,
                                         uint32_t *out_x, uint32_t *out_y)
@@ -171,6 +185,8 @@ void ant_colony_destroy(AntColony *colony)
     colony->occupancy_width = 0;
 }
 
+/* A fresh ant receives independent behavioral and scheduling state, then claims
+ * a random empty read-head location before becoming enabled. */
 void ant_randomize(Ant *ant, AntColony *colony, const World *world, Lfsr32 *rng, const TurmiteRule *rule)
 {
     if (!ant || !colony || !world || !rng || !rule) return;
@@ -191,6 +207,8 @@ void ant_randomize(Ant *ant, AntColony *colony, const World *world, Lfsr32 *rng,
     atomic_fetch_or_explicit(&colony->enabled_mask, UINT32_C(1) << index, memory_order_release);
 }
 
+/* Population doubling copies the source ant's phenotype but starts the clone
+ * at a different location with a fresh full token bucket and RNG stream. */
 void ant_clone(Ant *dst, AntColony *colony, const Ant *src, const World *world, Lfsr32 *rng)
 {
     if (!dst || !src || !colony || !world || !rng) return;
@@ -234,6 +252,8 @@ uint32_t ant_position_y(const AntColony *colony, size_t ant_index)
     return packed_y(ant_packed_position(colony, ant_index));
 }
 
+/* Collision/HALT reincarnation keeps the location but replaces behavior and
+ * scheduling parameters, making clobbering the evolutionary mechanism. */
 void ant_mutate_in_place(Ant *ant)
 {
     const TurmiteRule *rule = rules_pick(ant_rng_uniform(&ant->rng_state, (uint32_t)rules_count()));
@@ -297,6 +317,11 @@ static bool mark_collision_loser(Ant *loser, AntColony *colony)
     return false;
 }
 
+/* Move the read head by transferring ownership between occupancy bytes.
+ * Empty destinations take one CAS. On contact, token balance is "health";
+ * healthier ant wins, with lower ant index as deterministic tie-breaker.
+ * A winner replaces the resident byte; the loser becomes displaced/clobbered
+ * and is later reincarnated by the scheduler after it can reclaim its position. */
 static bool move_claim(Ant *self, AntColony *colony,
                        uint32_t old_x, uint32_t old_y,
                        uint32_t new_x, uint32_t new_y)
@@ -369,6 +394,11 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
     const size_t width = (size_t)world->width;
     size_t executed = 0;
 
+    /* One instruction follows the classic turmite cycle:
+     * read tape -> choose table action -> write -> change state/heading -> move.
+     * Only whole-token grants enter this loop, so one relaxed token decrement is
+     * enough per instruction. Tape read/write remains deliberately non-atomic as
+     * a transaction even though each individual byte access is atomic. */
     while (executed < quantum) {
         atomic_fetch_sub_explicit(&ant->tokens_fp, TOKEN_FP_ONE, memory_order_relaxed);
 
@@ -413,6 +443,8 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
         ++executed;
     }
 
+    /* Publish cold state only once per burst. This keeps the instruction loop
+     * cache-local and avoids a shared position store on every move. */
     publish_position(colony, self_index, x, y);
     atomic_store_explicit(&ant->state, state, memory_order_relaxed);
     atomic_store_explicit(&ant->heading, heading, memory_order_relaxed);
