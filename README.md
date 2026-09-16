@@ -20,7 +20,8 @@ The prototype keeps the machine's important behaviors intact while using Linux a
 - doubling clones ants at random positions
 - halving applies scheduler/resource pressure and lets ants expire
 - Galois LFSR pseudo-random generator seeded from host entropy or an explicit seed
-- SDL2 display at a throttled 60 FPS, with 4x4 pixel cells
+- SDL2 display at a throttled 60 FPS
+- fullscreen presentation by default, with one logical world cell per display pixel
 - optional development HUD
 - five-minute prototype watchdog lifecycle (configurable for testing)
 
@@ -39,11 +40,27 @@ make
 ./turmite
 ```
 
+By default the renderer uses SDL display 0 in borderless desktop fullscreen mode. The selected monitor's native pixel dimensions become the universe dimensions, so a 1920×1080 display creates a 1920×1080 world and each world cell maps to one physical pixel.
+
+For multi-monitor systems, choose a different SDL display index with:
+
+```sh
+./turmite --display 1
+./turmite --display 2
+```
+
+SDL display numbering comes from the operating system/SDL enumeration; display 0 is the default. `--windowed` restores a normal window and makes `--width` / `--height` control the universe dimensions again:
+
+```sh
+./turmite --windowed --width 1200 --height 800
+```
+
 Useful examples:
 
 ```sh
 ./turmite --ants 16 --quantum 16 --seed 0x12345678
-./turmite --ants 32 --quantum 64 --workers 2 --width 1200 --height 800
+./turmite --display 1 --ants 32 --token-rate-divisor 100 --min-service 32
+./turmite --windowed --width 1200 --height 800 --workers 2
 ./turmite --minutes 0.25
 ```
 
@@ -80,6 +97,8 @@ The default is 127 retained pages, sampled once per second. Page counts are `1,3
 ./turmite --dump-pages 255 --dump-interval 0.5 --dump-dir ./captures
 ```
 
+With 1×1 fullscreen cells, dump memory now scales directly with monitor resolution. For example, 127 raw pages require roughly 263 MB at 1920×1080 and roughly 1.05 GB at 3840×2160, before metadata/allocator overhead. Use a smaller `--dump-pages` value on large displays if needed.
+
 Each dump contains:
 
 - `manifest.txt`: seed, world dimensions, scheduler settings, per-page age/hash/change count, and per-ant state/rule/token metadata
@@ -90,7 +109,7 @@ Each dump contains:
 
 ## Headless / performance work
 
-The reference prototype can now run without opening an SDL window:
+The reference prototype can run without opening an SDL window. Headless mode retains the explicit `--width` / `--height` universe dimensions:
 
 ```bash
 ./turmite --headless --ants 32 --quantum 64 --dump-pages 127
@@ -118,7 +137,6 @@ perf record -g ./turmite --headless --ants 32 --quantum 64 --minutes 0.25 --dump
 perf report
 ```
 
-
 ## Fedora perf
 
 On Fedora 44, the kernel `perf` tool is packaged as `perf`. Install it with:
@@ -132,8 +150,6 @@ Then run:
 ```bash
 make perf-stat
 ```
-
-The Fedora package listing confirms `perf` is available for Fedora 44.
 
 ## V4 profiling notes
 
@@ -159,17 +175,23 @@ Use the existing profiling targets to compare against V4:
     make perf-record-1w
     make perf-record-saturated
 
-
-
 ## V6 scheduling / hot-path optimization
 
 V6 removes the per-move `positions[]` store from the instruction loop. During a lease, `occupancy[]` is the authoritative read-head residency index; packed positions are published once at the quantum boundary. The common empty-destination move is attempted directly with one CAS, and a failed CAS returns the resident id for collision health comparison.
 
-Normal WFQ service now supports a minimum batch threshold without changing long-term token generation rates:
+Normal WFQ service supports a minimum batch threshold without changing long-term token generation rates:
 
     ./turmite --quantum 256 --min-service 16
 
-`--min-service 1` reproduces the old unbatched behavior. Draining ants bypass the threshold so halving can still complete. Useful profile comparisons are:
+`--min-service 1` reproduces the old unbatched behavior. Draining ants bypass the threshold so halving can still complete.
+
+The whole universe can also be slowed without changing the underlying inherited/mutated per-ant rates:
+
+    ./turmite --token-rate-divisor 100 --min-service 32
+
+The divisor controls how quickly energy accumulates; `--min-service` controls how much work is released in each burst. Together they can produce deliberately slow, chunky visual motion.
+
+Useful profile comparisons are:
 
     make perf-record-unbatched
     make perf-record-1w
