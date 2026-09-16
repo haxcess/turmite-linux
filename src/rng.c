@@ -5,12 +5,15 @@
 #include <time.h>
 #include <unistd.h>
 
+/* Zero is the absorbing state of an LFSR, so remap it to a non-zero seed. */
 void rng_seed(Lfsr32 *rng, uint32_t seed)
 {
     if (seed == 0) seed = 0x1u;
     atomic_store_explicit(&rng->state, seed, memory_order_relaxed);
 }
 
+/* Galois LFSR step. The CAS loop lets multiple control/setup threads advance
+ * one generator without a mutex; runtime ants use private copies instead. */
 uint32_t rng_next(Lfsr32 *rng)
 {
     uint32_t old = atomic_load_explicit(&rng->state, memory_order_relaxed);
@@ -26,6 +29,8 @@ uint32_t rng_next(Lfsr32 *rng)
     }
 }
 
+/* Modulo reduction is sufficient here because these choices drive visual
+ * variation rather than cryptographic/statistical sampling. */
 uint32_t rng_uniform(Lfsr32 *rng, uint32_t upper_exclusive)
 {
     if (upper_exclusive == 0) return 0;
@@ -37,6 +42,8 @@ float rng_unit(Lfsr32 *rng)
     return (float)(rng_next(rng) / 4294967295.0);
 }
 
+/* Prefer kernel entropy for new universes; fall back to process/time values so
+ * startup still works on constrained hosts. Explicit --seed bypasses this. */
 uint32_t rng_entropy_seed(void)
 {
     uint32_t seed = 0;
