@@ -3,99 +3,27 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const int8_t DX[4] = { 0, 1, 0, -1 };
-static const int8_t DY[4] = { -1, 0, 1, 0 };
-
-static inline uint8_t apply_turn(uint8_t heading, TurnCode turn)
-{
-    switch (turn) {
-        case TURN_R: return (uint8_t)((heading + 1u) & 3u);
-        case TURN_L: return (uint8_t)((heading + 3u) & 3u);
-        case TURN_B: return (uint8_t)((heading + 2u) & 3u);
-        case TURN_N: return 0;
-        case TURN_E: return 1;
-        case TURN_S: return 2;
-        case TURN_W: return 3;
-        case TURN_F:
-        case TURN_H:
-        default: return heading;
-    }
-}
-
-static inline uint32_t ant_rng_next(uint32_t *state)
-{
-    uint32_t old = *state;
-    uint32_t next = old >> 1;
-    if (old & 1u) next ^= 0x80200003u;
-    *state = next ? next : 1u;
-    return next;
-}
-
-static inline uint32_t ant_rng_uniform(uint32_t *state, uint32_t upper_exclusive)
-{
-    return upper_exclusive ? ant_rng_next(state) % upper_exclusive : 0;
-}
-
-static uint32_t random_rate(uint32_t *state)
-{
-    return 50000u + ant_rng_uniform(state, 1950001u);
-}
-
-static uint32_t random_weight(uint32_t *state)
-{
-    return 1u + ant_rng_uniform(state, 8u);
-}
-
-static uint32_t random_capacity_fp(uint32_t *state)
-{
-    uint32_t whole = 128u + ant_rng_uniform(state, 3969u);
-    return whole * TOKEN_FP_ONE;
-}
-
-static inline uint32_t flags_load(const Ant *ant)
-{
-    return atomic_load_explicit(&ant->flags, memory_order_acquire);
-}
-
-static inline void flags_or(Ant *ant, uint32_t bits)
-{
-    atomic_fetch_or_explicit(&ant->flags, bits, memory_order_acq_rel);
-}
-
-static inline void flags_and(Ant *ant, uint32_t bits)
-{
-    atomic_fetch_and_explicit(&ant->flags, bits, memory_order_acq_rel);
-}
+static const int DX[4] = {0, 1, 0, -1};
+static const int DY[4] = {-1, 0, 1, 0};
 
 static inline uint32_t pack_position(uint32_t x, uint32_t y)
 {
-    return ((y & UINT32_C(0xffff)) << 16) | (x & UINT32_C(0xffff));
+    return (y << 16) | x;
 }
 
-static inline uint32_t packed_x(uint32_t p) { return p & UINT32_C(0xffff); }
-static inline uint32_t packed_y(uint32_t p) { return p >> 16; }
+static inline uint32_t packed_x(uint32_t p)
+{
+    return p & 0xffffu;
+}
+
+static inline uint32_t packed_y(uint32_t p)
+{
+    return p >> 16;
+}
 
 static inline size_t ant_index_of(const AntColony *colony, const Ant *ant)
 {
     return (size_t)(ant - colony->ants);
-}
-
-static inline void publish_position(AntColony *colony, size_t index, uint32_t x, uint32_t y)
-{
-    atomic_store_explicit(&colony->positions[index], pack_position(x, y), memory_order_relaxed);
-}
-
-static void reset_schedule(Ant *ant, uint32_t *state)
-{
-    atomic_store_explicit(&ant->token_rate, random_rate(state), memory_order_relaxed);
-    atomic_store_explicit(&ant->token_capacity_fp, random_capacity_fp(state), memory_order_relaxed);
-    atomic_store_explicit(&ant->tokens_fp, 0u, memory_order_relaxed);
-    atomic_store_explicit(&ant->weight, random_weight(state), memory_order_relaxed);
-}
-
-static inline size_t occupancy_index(const AntColony *colony, uint32_t x, uint32_t y)
-{
-    return (size_t)y * (size_t)colony->occupancy_width + (size_t)x;
 }
 
 static inline uint8_t ant_owner_id(size_t index)
@@ -103,73 +31,135 @@ static inline uint8_t ant_owner_id(size_t index)
     return (uint8_t)(index + 1u);
 }
 
-static inline bool occupancy_claim_empty(AntColony *colony, size_t index, size_t cell)
+static inline size_t occupancy_index(const AntColony *colony, uint32_t x, uint32_t y)
 {
-    uint8_t expected = 0;
-    return atomic_compare_exchange_strong_explicit(&colony->occupancy[cell], &expected,
-                                                    ant_owner_id(index),
-                                                    memory_order_acq_rel,
-                                                    memory_order_relaxed);
+    return (size_t)y * (size_t)colony->occupancy_width + x;
 }
 
-static void reset_ant_slots(AntColony *colony)
+static uint32_t ant_rng_next(uint32_t *state)
 {
-    atomic_store_explicit(&colony->active_population, 0, memory_order_relaxed);
-    atomic_store_explicit(&colony->collisions, 0, memory_order_relaxed);
-    atomic_store_explicit(&colony->enabled_mask, 0, memory_order_relaxed);
-    for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
-        Ant *ant = &colony->ants[i];
-        atomic_store_explicit(&ant->flags, 0, memory_order_relaxed);
-        atomic_store_explicit(&colony->positions[i], 0, memory_order_relaxed);
-        atomic_store_explicit(&ant->heading, 0, memory_order_relaxed);
-        atomic_store_explicit(&ant->state, 0, memory_order_relaxed);
-        atomic_store_explicit(&ant->rule_index, 0, memory_order_relaxed);
-        atomic_store_explicit(&ant->tokens_fp, 0, memory_order_relaxed);
-        atomic_store_explicit(&ant->token_rate, 1000u, memory_order_relaxed);
-        atomic_store_explicit(&ant->token_capacity_fp, 64u * TOKEN_FP_ONE, memory_order_relaxed);
-        atomic_store_explicit(&ant->weight, 1u, memory_order_relaxed);
-        ant->rule = rules_get(0);
-        atomic_store_explicit(&colony->stats[i].instructions, 0, memory_order_relaxed);
-        atomic_store_explicit(&colony->stats[i].mutations, 0, memory_order_relaxed);
-        ant->rng_state = (uint32_t)(0x9E3779B9u ^ (uint32_t)i);
+    uint32_t x = *state;
+    if (x == 0) x = 1;
+    uint32_t lsb = x & 1u;
+    x >>= 1;
+    if (lsb) x ^= 0x80200003u;
+    *state = x;
+    return x;
+}
+
+static uint32_t ant_rng_uniform(uint32_t *state, uint32_t limit)
+{
+    if (limit <= 1u) return 0u;
+    return ant_rng_next(state) % limit;
+}
+
+static uint32_t random_rate(uint32_t *state)
+{
+    return 50000u + ant_rng_uniform(state, 1950001u);
+}
+
+static uint32_t random_capacity_fp(uint32_t *state)
+{
+    const uint32_t whole = 128u + ant_rng_uniform(state, 3969u);
+    return whole << TOKEN_FP_SHIFT;
+}
+
+static uint32_t random_weight(uint32_t *state)
+{
+    return 1u + ant_rng_uniform(state, 16u);
+}
+
+static void reset_schedule(Ant *ant, uint32_t *state)
+{
+    atomic_store_explicit(&ant->token_rate, random_rate(state), memory_order_relaxed);
+    const uint32_t cap = random_capacity_fp(state);
+    atomic_store_explicit(&ant->token_capacity_fp, cap, memory_order_relaxed);
+    atomic_store_explicit(&ant->tokens_fp, cap, memory_order_relaxed);
+    atomic_store_explicit(&ant->weight, random_weight(state), memory_order_relaxed);
+}
+
+static uint8_t apply_turn(uint8_t heading, Turn turn)
+{
+    switch (turn) {
+        case TURN_L: return (heading + 3u) & 3u;
+        case TURN_R: return (heading + 1u) & 3u;
+        case TURN_U: return (heading + 2u) & 3u;
+        case TURN_N: return 0u;
+        case TURN_E: return 1u;
+        case TURN_S: return 2u;
+        case TURN_W: return 3u;
+        case TURN_H: return heading;
+        default: return heading;
     }
+}
+
+static inline uint32_t flags_load(const Ant *ant)
+{
+    return atomic_load_explicit(&ant->flags, memory_order_acquire);
+}
+
+static inline void publish_position(AntColony *colony, size_t index, uint32_t x, uint32_t y)
+{
+    atomic_store_explicit(&colony->positions[index], pack_position(x, y), memory_order_relaxed);
+}
+
+static bool claim_random_empty_position(AntColony *colony, const World *world,
+                                        size_t ant_index, uint32_t *rng_state,
+                                        uint32_t *out_x, uint32_t *out_y)
+{
+    const uint8_t self_id = ant_owner_id(ant_index);
+    for (size_t attempt = 0; attempt < world->cells; ++attempt) {
+        const uint32_t x = ant_rng_uniform(rng_state, (uint32_t)world->width);
+        const uint32_t y = ant_rng_uniform(rng_state, (uint32_t)world->height);
+        const size_t cell = occupancy_index(colony, x, y);
+        uint8_t expected = 0;
+        if (atomic_compare_exchange_strong_explicit(&colony->occupancy[cell], &expected, self_id,
+                                                    memory_order_acq_rel,
+                                                    memory_order_relaxed)) {
+            *out_x = x;
+            *out_y = y;
+            return true;
+        }
+    }
+    return false;
 }
 
 int ant_colony_init(AntColony *colony, const World *world)
 {
-    if (!colony || !world || world->cells == 0 || world->width <= 0) return -1;
+    if (!colony || !world || world->width <= 0 || world->height <= 0) return -1;
     memset(colony, 0, sizeof(*colony));
-    colony->occupancy = calloc(world->cells, sizeof(*colony->occupancy));
-    if (!colony->occupancy) return -1;
-    colony->occupancy_cells = world->cells;
     colony->occupancy_width = (uint32_t)world->width;
-    for (size_t i = 0; i < world->cells; ++i) atomic_init(&colony->occupancy[i], 0);
-    for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
-        atomic_init(&colony->positions[i], 0);
-        atomic_init(&colony->ants[i].flags, 0);
-        atomic_init(&colony->ants[i].heading, 0);
-        atomic_init(&colony->ants[i].state, 0);
-        atomic_init(&colony->ants[i].rule_index, 0);
-        atomic_init(&colony->ants[i].tokens_fp, 0);
-        atomic_init(&colony->ants[i].token_rate, 1000u);
-        atomic_init(&colony->ants[i].token_capacity_fp, 64u * TOKEN_FP_ONE);
-        atomic_init(&colony->ants[i].weight, 1u);
-        atomic_init(&colony->stats[i].instructions, 0);
-        atomic_init(&colony->stats[i].mutations, 0);
-    }
+    colony->occupancy_cells = world->cells;
+    colony->occupancy = calloc(colony->occupancy_cells, sizeof(*colony->occupancy));
+    if (!colony->occupancy) return -1;
+
     atomic_init(&colony->enabled_mask, 0);
     atomic_init(&colony->active_population, 0);
     atomic_init(&colony->collisions, 0);
-    reset_ant_slots(colony);
+    for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
+        atomic_init(&colony->positions[i], 0);
+        atomic_init(&colony->stats[i].instructions, 0);
+        atomic_init(&colony->stats[i].mutations, 0);
+    }
     return 0;
 }
 
 void ant_colony_reset(AntColony *colony)
 {
     if (!colony) return;
-    for (size_t i = 0; i < colony->occupancy_cells; ++i)
-        atomic_store_explicit(&colony->occupancy[i], 0, memory_order_relaxed);
-    reset_ant_slots(colony);
+    for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
+        memset(&colony->ants[i], 0, sizeof(colony->ants[i]));
+        atomic_store_explicit(&colony->positions[i], 0, memory_order_relaxed);
+        atomic_store_explicit(&colony->stats[i].instructions, 0, memory_order_relaxed);
+        atomic_store_explicit(&colony->stats[i].mutations, 0, memory_order_relaxed);
+    }
+    if (colony->occupancy) {
+        for (size_t i = 0; i < colony->occupancy_cells; ++i)
+            atomic_store_explicit(&colony->occupancy[i], 0, memory_order_relaxed);
+    }
+    atomic_store_explicit(&colony->enabled_mask, 0, memory_order_relaxed);
+    atomic_store_explicit(&colony->active_population, 0, memory_order_relaxed);
+    atomic_store_explicit(&colony->collisions, 0, memory_order_relaxed);
 }
 
 void ant_colony_destroy(AntColony *colony)
@@ -181,63 +171,46 @@ void ant_colony_destroy(AntColony *colony)
     colony->occupancy_width = 0;
 }
 
-static void reseed_local_rng(Ant *ant, uint32_t seed)
-{
-    ant->rng_state = seed ? seed : 1u;
-}
-
-static void place_random_empty(Ant *ant, AntColony *colony, const World *world, uint32_t *state)
-{
-    const size_t ant_index = ant_index_of(colony, ant);
-    const size_t cells = world->cells;
-    size_t start = ant_rng_uniform(state, (uint32_t)cells);
-    for (size_t n = 0; n < cells; ++n) {
-        const size_t cell = (start + n) % cells;
-        if (occupancy_claim_empty(colony, ant_index, cell)) {
-            const uint32_t x = (uint32_t)(cell % (size_t)world->width);
-            const uint32_t y = (uint32_t)(cell / (size_t)world->width);
-            publish_position(colony, ant_index, x, y);
-            return;
-        }
-    }
-    /* With <=32 ants this should be unreachable for any useful world. */
-    publish_position(colony, ant_index, 0, 0);
-}
-
 void ant_randomize(Ant *ant, AntColony *colony, const World *world, Lfsr32 *rng, const TurmiteRule *rule)
 {
-    /* Seed the ant-local generator from the universe RNG once. */
-    reseed_local_rng(ant, rng_next(rng));
-
+    if (!ant || !colony || !world || !rng || !rule) return;
+    const size_t index = ant_index_of(colony, ant);
+    uint32_t seed = rng_next(rng);
+    if (seed == 0) seed = (uint32_t)(index + 1u);
+    ant->rng_state = seed;
     ant->rule = rule;
     atomic_store_explicit(&ant->rule_index, (uint16_t)rules_index_of(rule), memory_order_relaxed);
-    const size_t index = ant_index_of(colony, ant);
-    place_random_empty(ant, colony, world, &ant->rng_state);
     atomic_store_explicit(&ant->heading, (uint8_t)ant_rng_uniform(&ant->rng_state, 4u), memory_order_relaxed);
     atomic_store_explicit(&ant->state, (uint8_t)ant_rng_uniform(&ant->rng_state, rule->states), memory_order_relaxed);
     reset_schedule(ant, &ant->rng_state);
+
+    uint32_t x = 0, y = 0;
+    if (!claim_random_empty_position(colony, world, index, &ant->rng_state, &x, &y)) return;
+    publish_position(colony, index, x, y);
     atomic_store_explicit(&ant->flags, ANT_F_ENABLED, memory_order_release);
     atomic_fetch_or_explicit(&colony->enabled_mask, UINT32_C(1) << index, memory_order_release);
 }
 
 void ant_clone(Ant *dst, AntColony *colony, const Ant *src, const World *world, Lfsr32 *rng)
 {
-    const TurmiteRule *src_rule = src->rule;
-    dst->rule = src_rule;
+    if (!dst || !src || !colony || !world || !rng) return;
+    const size_t index = ant_index_of(colony, dst);
+    dst->rng_state = rng_next(rng);
+    if (dst->rng_state == 0) dst->rng_state = (uint32_t)(index + 1u);
+    dst->rule = src->rule;
     atomic_store_explicit(&dst->rule_index, atomic_load_explicit(&src->rule_index, memory_order_relaxed), memory_order_relaxed);
-    const size_t dst_index = ant_index_of(colony, dst);
-    uint32_t placement_state = rng_next(rng);
-    if (!placement_state) placement_state = 1u;
-    place_random_empty(dst, colony, world, &placement_state);
     atomic_store_explicit(&dst->heading, atomic_load_explicit(&src->heading, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->state, atomic_load_explicit(&src->state, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->token_rate, atomic_load_explicit(&src->token_rate, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->token_capacity_fp, atomic_load_explicit(&src->token_capacity_fp, memory_order_relaxed), memory_order_relaxed);
-    atomic_store_explicit(&dst->tokens_fp, 0, memory_order_relaxed);
+    atomic_store_explicit(&dst->tokens_fp, atomic_load_explicit(&dst->token_capacity_fp, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->weight, atomic_load_explicit(&src->weight, memory_order_relaxed), memory_order_relaxed);
-    reseed_local_rng(dst, rng_next(rng));
+
+    uint32_t x = 0, y = 0;
+    if (!claim_random_empty_position(colony, world, index, &dst->rng_state, &x, &y)) return;
+    publish_position(colony, index, x, y);
     atomic_store_explicit(&dst->flags, ANT_F_ENABLED, memory_order_release);
-    atomic_fetch_or_explicit(&colony->enabled_mask, UINT32_C(1) << dst_index, memory_order_release);
+    atomic_fetch_or_explicit(&colony->enabled_mask, UINT32_C(1) << index, memory_order_release);
 }
 
 uint16_t ant_rule_index(const Ant *ant)
@@ -324,8 +297,6 @@ static bool mark_collision_loser(Ant *loser, AntColony *colony)
     return false;
 }
 
-/* Claim a destination cell in O(1). The occupancy byte is only an index into
- * authoritative ant positions. World-cell memory remains independent and racy. */
 static bool move_claim(Ant *self, AntColony *colony,
                        uint32_t old_x, uint32_t old_y,
                        uint32_t new_x, uint32_t new_y)
@@ -342,26 +313,16 @@ static bool move_claim(Ant *self, AntColony *colony,
                                                       memory_order_relaxed);
     }
 
-    /* occupancy[] is the authoritative cross-thread residency index while an
-     * ant is leased. positions[] is a cold published snapshot and is updated
-     * once at the quantum boundary, not on every move.
-     *
-     * The normal empty-cell path is one CAS: expected starts at EMPTY and is
-     * overwritten with the current owner if the claim fails, avoiding a
-     * separate load before every move. */
     for (;;) {
         uint8_t owner = 0;
         if (atomic_compare_exchange_weak_explicit(&colony->occupancy[new_cell], &owner, self_id,
                                                   memory_order_acq_rel,
                                                   memory_order_relaxed))
             return true;
-
         if (owner == self_id) return true;
 
         const size_t other_index = (size_t)(owner - 1u);
         if (owner == 0 || other_index >= TURMITE_MAX_ANTS) {
-            /* A spurious weak-CAS failure (owner==0) or impossible/corrupt
-             * owner byte simply retries the direct claim. */
             if (owner != 0) {
                 uint8_t expected = owner;
                 (void)atomic_compare_exchange_weak_explicit(&colony->occupancy[new_cell], &expected, 0,
@@ -389,7 +350,6 @@ static bool move_claim(Ant *self, AntColony *colony,
             (void)mark_collision_loser(other, colony);
             return true;
         }
-        /* A third contender changed the owner. Re-evaluate against the new resident. */
     }
 }
 
@@ -410,29 +370,25 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
     size_t executed = 0;
 
     while (executed < quantum) {
-        /* The scheduler grants no more instructions than the ant currently has
-         * whole tokens for, so the hot path can consume one token with a single
-         * relaxed RMW. A collision may clobber the ant while it is leased; the
-         * current quantum is its task and may complete. */
         atomic_fetch_sub_explicit(&ant->tokens_fp, TOKEN_FP_ONE, memory_order_relaxed);
 
         const size_t idx = (size_t)y * width + x;
         const uint8_t color = atomic_load_explicit(&world->data[idx], memory_order_relaxed);
         const RuleAction *action = NULL;
-        if (state < rule->states && color < rule->colors) {
+        if (state < rule->states && color < rule->colors)
             action = &rule->table[state][color];
-        }
         RuleAction fallback = { color, TURN_F, state, false };
         if (!action) action = &fallback;
 
-        /* Deliberately not a transaction: another worker may read/write this cell between these operations. */
-        atomic_store_explicit(&world->data[idx], action->write_color, memory_order_relaxed);
+        /* One instruction deposits both a new logical tape value and the
+         * current Linux display ink for that value. Neither write is part of a
+         * transaction; concurrent ants retain the universe's last-writer-wins
+         * behavior. */
+        world_store_inked(world, idx, action->write_color);
 
         state = action->next_state;
         heading = apply_turn(heading, action->turn);
         if (action->halt) {
-            /* A HALT is self-clobber: preserve position, then let the scheduler
-             * reincarnate this ant with a new rule/state/schedule. */
             atomic_store_explicit(&ant->state, state, memory_order_relaxed);
             atomic_store_explicit(&ant->heading, heading, memory_order_relaxed);
             atomic_fetch_or_explicit(&ant->flags, ANT_F_CLOBBERED, memory_order_acq_rel);
@@ -457,8 +413,6 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
         ++executed;
     }
 
-    /* Publish the externally observed position once per dispatch. During the
-     * quantum occupancy[] is the authoritative residency structure. */
     publish_position(colony, self_index, x, y);
     atomic_store_explicit(&ant->state, state, memory_order_relaxed);
     atomic_store_explicit(&ant->heading, heading, memory_order_relaxed);
@@ -479,15 +433,15 @@ uint64_t ant_mutation_count(const AntColony *colony, size_t ant_index)
 
 double ant_tokens(const Ant *ant)
 {
-    return (double)atomic_load_explicit(&ant->tokens_fp, memory_order_relaxed) / (double)TOKEN_FP_ONE;
+    return ant ? (double)atomic_load_explicit(&ant->tokens_fp, memory_order_relaxed) / TOKEN_FP_ONE : 0.0;
 }
 
 double ant_token_rate(const Ant *ant)
 {
-    return (double)atomic_load_explicit(&ant->token_rate, memory_order_relaxed);
+    return ant ? (double)atomic_load_explicit(&ant->token_rate, memory_order_relaxed) : 0.0;
 }
 
 double ant_token_capacity(const Ant *ant)
 {
-    return (double)atomic_load_explicit(&ant->token_capacity_fp, memory_order_relaxed) / (double)TOKEN_FP_ONE;
+    return ant ? (double)atomic_load_explicit(&ant->token_capacity_fp, memory_order_relaxed) / TOKEN_FP_ONE : 0.0;
 }
