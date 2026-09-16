@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <getopt.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,7 +21,8 @@
 
 #define DEFAULT_WIDTH 1200
 #define DEFAULT_HEIGHT 800
-#define CELL_SIZE 4
+#define CELL_SIZE 1
+#define DEFAULT_DISPLAY 0
 #define DEFAULT_WORKERS 2
 #define DEFAULT_ANTS 8
 #define DEFAULT_QUANTUM 32
@@ -58,6 +60,8 @@ typedef struct {
     int width;
     int height;
     int cell_size;
+    int display_index;
+    bool fullscreen;
     size_t workers;
     size_t initial_ants;
     size_t quantum;
@@ -104,7 +108,7 @@ static void *worker_main(void *arg)
 }
 
 /* Reset the shared tape and ant population for a fresh universe while keeping
- * the process-level configuration (window, workers, scheduler tuning) intact. */
+ * the process-level configuration (display, workers, scheduler tuning) intact. */
 static void universe_seed(Universe *u)
 {
     world_clear(&u->world);
@@ -160,7 +164,8 @@ static int universe_init(Universe *u, uint32_t seed)
 
     u->hud_visible = true;
     if (!u->headless) {
-        if (renderer_init(&u->renderer, u->width, u->height, u->cell_size, u->hud_visible) != 0) {
+        if (renderer_init(&u->renderer, u->width, u->height, u->cell_size,
+                          u->hud_visible, u->display_index, u->fullscreen) != 0) {
             fprintf(stderr, "renderer initialization failed\n");
             scheduler_destroy(&u->scheduler);
             ant_colony_destroy(&u->colony);
@@ -224,6 +229,16 @@ static bool parse_uint(const char *s, size_t *out)
     return true;
 }
 
+static bool parse_display(const char *s, int *out)
+{
+    char *end = NULL;
+    errno = 0;
+    long v = strtol(s, &end, 0);
+    if (errno || !end || *end || v < 0 || v > INT_MAX) return false;
+    *out = (int)v;
+    return true;
+}
+
 static bool parse_seed(const char *s, uint32_t *out)
 {
     char *end = NULL;
@@ -237,21 +252,23 @@ static bool parse_seed(const char *s, uint32_t *out)
 static void usage(const char *prog)
 {
     printf("Usage: %s [options]\n", prog);
-    printf("  --seed HEX         deterministic universe seed\n");
-    printf("  --ants N            2,4,8,16,32\n");
-    printf("  --quantum N         maximum instructions per dispatch (1..4096)\n");
-    printf("  --min-service N     minimum normal dispatch batch (default 16)\n");
-    printf("  --token-rate-divisor N  divide all ant token generation rates (default 1)\n");
-    printf("  --workers N         Linux worker pthreads (default 2)\n");
-    printf("  --width N            window width (multiple of 4)\n");
-    printf("  --height N           window height (multiple of 4)\n");
-    printf("  --minutes N          universe lifetime (default 5)\n");
-    printf("  --dump-pages N       retained debug pages: 1,3,7,...,1023 (default 127)\n");
-    printf("  --dump-interval N    seconds between retained pages (default 1)\n");
-    printf("  --dump-dir PATH      parent directory for debug dumps (default ./turmite-dumps)\n");
-    printf("  --no-hud             hide developer HUD\n");
-    printf("  --headless           run without SDL; type Q then Enter to debug-quit\n");
-    printf("  --help               show this help\n");
+    printf("  --seed HEX             deterministic universe seed\n");
+    printf("  --ants N               2,4,8,16,32\n");
+    printf("  --quantum N            maximum instructions per dispatch (1..4096)\n");
+    printf("  --min-service N        minimum normal dispatch batch (default 16)\n");
+    printf("  --token-rate-divisor N divide all ant token generation rates (default 1)\n");
+    printf("  --workers N            Linux worker pthreads (default 2)\n");
+    printf("  --display N            fullscreen monitor index (default 0)\n");
+    printf("  --windowed             use a normal window instead of fullscreen\n");
+    printf("  --width N              windowed/headless universe width (default 1200)\n");
+    printf("  --height N             windowed/headless universe height (default 800)\n");
+    printf("  --minutes N            universe lifetime (default 5)\n");
+    printf("  --dump-pages N         retained debug pages: 1,3,7,...,1023 (default 127)\n");
+    printf("  --dump-interval N      seconds between retained pages (default 1)\n");
+    printf("  --dump-dir PATH        parent directory for debug dumps (default ./turmite-dumps)\n");
+    printf("  --no-hud               hide developer HUD\n");
+    printf("  --headless             run without SDL; type Q then Enter to debug-quit\n");
+    printf("  --help                 show this help\n");
 }
 
 static bool valid_population(size_t n)
@@ -448,6 +465,8 @@ int main(int argc, char **argv)
     size_t workers = DEFAULT_WORKERS;
     size_t width = DEFAULT_WIDTH;
     size_t height = DEFAULT_HEIGHT;
+    int display_index = DEFAULT_DISPLAY;
+    bool fullscreen = true;
     double minutes = DEFAULT_MINUTES;
     size_t dump_pages = DEFAULT_DUMP_PAGES;
     double dump_interval = DEFAULT_DUMP_INTERVAL;
@@ -464,6 +483,8 @@ int main(int argc, char **argv)
         {"min-service", required_argument, NULL, 'b'},
         {"token-rate-divisor", required_argument, NULL, 'v'},
         {"workers", required_argument, NULL, 'w'},
+        {"display", required_argument, NULL, 'p'},
+        {"windowed", no_argument, NULL, 'W'},
         {"width", required_argument, NULL, 'x'},
         {"height", required_argument, NULL, 'y'},
         {"minutes", required_argument, NULL, 'm'},
@@ -477,7 +498,7 @@ int main(int argc, char **argv)
     };
 
     for (;;) {
-        int c = getopt_long(argc, argv, "s:a:q:b:v:w:x:y:m:d:i:D:nHh", opts, NULL);
+        int c = getopt_long(argc, argv, "s:a:q:b:v:w:p:Wx:y:m:d:i:D:nHh", opts, NULL);
         if (c == -1) break;
         switch (c) {
             case 's': if (!parse_seed(optarg, &explicit_seed)) { fprintf(stderr, "bad --seed\n"); return 2; } has_seed = true; break;
@@ -486,6 +507,8 @@ int main(int argc, char **argv)
             case 'b': if (!parse_uint(optarg, &min_service) || min_service < 1 || min_service > MAX_QUANTUM) { fprintf(stderr, "bad --min-service\n"); return 2; } break;
             case 'v': if (!parse_uint(optarg, &token_rate_divisor) || token_rate_divisor > UINT32_MAX) { fprintf(stderr, "bad --token-rate-divisor\n"); return 2; } break;
             case 'w': if (!parse_uint(optarg, &workers) || workers > 8) { fprintf(stderr, "--workers must be 1..8\n"); return 2; } break;
+            case 'p': if (!parse_display(optarg, &display_index)) { fprintf(stderr, "bad --display\n"); return 2; } break;
+            case 'W': fullscreen = false; break;
             case 'x': if (!parse_uint(optarg, &width)) { fprintf(stderr, "bad --width\n"); return 2; } break;
             case 'y': if (!parse_uint(optarg, &height)) { fprintf(stderr, "bad --height\n"); return 2; } break;
             case 'm': minutes = strtod(optarg, NULL); if (minutes <= 0.0) { fprintf(stderr, "bad --minutes\n"); return 2; } break;
@@ -499,10 +522,19 @@ int main(int argc, char **argv)
         }
     }
 
-    width = (width / CELL_SIZE) * CELL_SIZE;
-    height = (height / CELL_SIZE) * CELL_SIZE;
-    if (width < 160 || height < 120) {
-        fprintf(stderr, "window is too small\n");
+    /* In fullscreen mode the monitor becomes the universe: one logical tape
+     * cell maps to one physical display pixel. Windowed/headless modes keep the
+     * explicit width/height controls for development and benchmarking. */
+    if (fullscreen && !headless) {
+        int display_width = 0;
+        int display_height = 0;
+        if (renderer_display_size(display_index, &display_width, &display_height) != 0) return 2;
+        width = (size_t)display_width;
+        height = (size_t)display_height;
+    }
+
+    if (width < 160 || height < 120 || width > INT_MAX || height > INT_MAX) {
+        fprintf(stderr, "universe dimensions are invalid\n");
         return 2;
     }
 
@@ -512,6 +544,8 @@ int main(int argc, char **argv)
     memset(&u, 0, sizeof(u));
     u.width = (int)width;
     u.height = (int)height;
+    u.display_index = display_index;
+    u.fullscreen = fullscreen;
     u.workers = workers;
     u.initial_ants = ants;
     u.quantum = quantum;
