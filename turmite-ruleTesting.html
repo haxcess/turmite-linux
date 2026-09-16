@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spider Vortex</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #050505;
+    overflow: hidden;
+    font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  canvas { display: block; }
+
+  #hud {
+    position: fixed;
+    left: 14px;
+    bottom: 12px;
+    color: rgba(230, 230, 235, 0.82);
+    font-size: 12px;
+    line-height: 1.55;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    pointer-events: none;
+    transition: opacity 0.6s ease;
+    opacity: 0.85;
+    user-select: none;
+  }
+  #hud.dim { opacity: 0.12; }
+  #hud .rule-name { color: #fff; font-weight: 600; }
+  #hud .keys { margin-top: 6px; opacity: 0.75; }
+  #hud .keys div { white-space: nowrap; }
+  #hud .flash {
+    margin-top: 6px;
+    color: #9be564;
+    min-height: 14px;
+  }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div><span class="rule-name" id="hud-rule">—</span></div>
+  <div id="hud-status">—</div>
+  <div class="keys">
+    <div>space pause · [ ] speed · r reset · n next rule</div>
+    <div>c recolor · f fullscreen · e export json · i import json</div>
+    <div>1-5 load slot · shift+1-5 save slot</div>
+  </div>
+  <div class="flash" id="hud-flash"></div>
+</div>
+
+<input type="file" id="importInput" accept="application/json" style="display:none">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // =========================================================================
+  // RULE CATALOG
+  // Turn codes: F=forward(no turn) R=right L=left B=u-turn H=hold(no move)
+  //             N/E/S/W=absolute compass heading
+  // table[state][color] = { w: writeColor, t: turnCode, n: nextState|"HALT" }
+  // Sourced from MaxRobinsonTheGreat/turmites, cenonym/trmt, and
+  // Joshua-Riek/turmite (Ed Pegg Jr. rules via Wolfram Demonstrations).
+  // "Matrix" (cenonym) is intentionally excluded here — its rule is a
+  // degenerate always-move-south walk; its actual visual (digital rain)
+  // comes from per-head independent glyph/trail rendering, an architecture
+  // this shared-grid-coloring engine doesn't implement. See
+  // turmite-rules-catalog.json for the full record including that one.
+  // =========================================================================
+  const RULES = [
+    { id: "langtons", name: "Langton's Ant", states: 1, colors: 2,
+      table: { 0: { 0: {w:1,t:"R",n:0}, 1: {w:0,t:"L",n:0} } } },
+
+    { id: "symmetrical", name: "Symmetrical", states: 1, colors: 6,
+      table: { 0: {
+        0:{w:1,t:"R",n:0}, 1:{w:2,t:"R",n:0}, 2:{w:3,t:"L",n:0},
+        3:{w:4,t:"L",n:0}, 4:{w:5,t:"R",n:0}, 5:{w:0,t:"R",n:0} } } },
+
+    { id: "snowflake", name: "Snowflake", states: 3, colors: 2,
+      table: {
+        0: { 0:{w:1,t:"L",n:1}, 1:{w:1,t:"R",n:0} },
+        1: { 0:{w:1,t:"B",n:1}, 1:{w:1,t:"B",n:2} },
+        2: { 0:{w:0,t:"F",n:2}, 1:{w:0,t:"B",n:0} } } },
+
+    { id: "archimedes", name: "Archimedes Spiral", states: 1, colors: 11,
+      table: { 0: {
+        0:{w:1,t:"L",n:0}, 1:{w:2,t:"R",n:0}, 2:{w:3,t:"R",n:0},
+        3:{w:4,t:"R",n:0}, 4:{w:5,t:"R",n:0}, 5:{w:6,t:"L",n:0},
+        6:{w:7,t:"L",n:0}, 7:{w:8,t:"L",n:0}, 8:{w:9,t:"R",n:0},
+        9:{w:10,t:"R",n:0}, 10:{w:0,t:"R",n:0} } } },
+
+    { id: "logarithmic", name: "Logarithmic Spiral", states: 1, colors: 12,
+      table: { 0: {
+        0:{w:1,t:"R",n:0}, 1:{w:2,t:"L",n:0}, 2:{w:3,t:"L",n:0},
+        3:{w:4,t:"L",n:0}, 4:{w:5,t:"L",n:0}, 5:{w:6,t:"R",n:0},
+        6:{w:7,t:"R",n:0}, 7:{w:8,t:"R",n:0}, 8:{w:9,t:"L",n:0},
+        9:{w:10,t:"L",n:0}, 10:{w:11,t:"L",n:0}, 11:{w:0,t:"R",n:0} } } },
+
+    { id: "squarefiller", name: "Square Filler", states: 1, colors: 9,
+      table: { 0: {
+        0:{w:1,t:"L",n:0}, 1:{w:2,t:"R",n:0}, 2:{w:3,t:"R",n:0},
+        3:{w:4,t:"R",n:0}, 4:{w:5,t:"R",n:0}, 5:{w:6,t:"R",n:0},
+        6:{w:7,t:"L",n:0}, 7:{w:8,t:"L",n:0}, 8:{w:0,t:"R",n:0} } } },
+
+    { id: "busybeaver3", name: "Busy Beaver (3-state)", states: 3, colors: 2,
+      table: {
+        0: { 0:{w:1,t:"E",n:1}, 1:{w:1,t:"W",n:2} },
+        1: { 0:{w:1,t:"W",n:0}, 1:{w:1,t:"E",n:1} },
+        2: { 0:{w:1,t:"W",n:1}, 1:{w:1,t:"E",n:"HALT"} } } },
+
+    { id: "builders", name: "Builders", states: 2, colors: 2,
+      table: {
+        0: { 0:{w:1,t:"L",n:1}, 1:{w:1,t:"R",n:1} },
+        1: { 0:{w:1,t:"R",n:1}, 1:{w:0,t:"R",n:0} } } },
+
+    { id: "critterhighway", name: "Critter Highway", states: 1, colors: 6,
+      table: { 0: {
+        0:{w:1,t:"W",n:0}, 1:{w:2,t:"R",n:0}, 2:{w:3,t:"S",n:0},
+        3:{w:4,t:"W",n:0}, 4:{w:5,t:"N",n:0}, 5:{w:0,t:"L",n:0} } } },
+
+    { id: "dotgrid", name: "Dotgrid", states: 3, colors: 3,
+      table: {
+        0: { 0:{w:1,t:"R",n:1}, 1:{w:0,t:"L",n:2}, 2:{w:1,t:"B",n:0} },
+        1: { 0:{w:0,t:"F",n:0}, 1:{w:1,t:"R",n:1} },
+        2: { 0:{w:0,t:"L",n:1}, 1:{w:1,t:"R",n:2} } } },
+
+    { id: "pipedream", name: "Pipedream", states: 1, colors: 9,
+      table: { 0: {
+        0:{w:1,t:"F",n:0}, 1:{w:2,t:"B",n:0}, 2:{w:3,t:"W",n:0},
+        3:{w:4,t:"L",n:0}, 4:{w:5,t:"W",n:0}, 5:{w:6,t:"W",n:0},
+        6:{w:7,t:"R",n:0}, 7:{w:8,t:"W",n:0}, 8:{w:0,t:"F",n:0} } } },
+
+    { id: "scaffold", name: "Scaffold", states: 1, colors: 10,
+      table: { 0: {
+        0:{w:1,t:"F",n:0}, 1:{w:2,t:"B",n:0}, 2:{w:3,t:"L",n:0},
+        3:{w:4,t:"N",n:0}, 4:{w:5,t:"E",n:0}, 5:{w:6,t:"S",n:0},
+        6:{w:7,t:"W",n:0}, 7:{w:8,t:"B",n:0}, 8:{w:9,t:"N",n:0},
+        9:{w:0,t:"W",n:0} } } },
+
+    { id: "transistor", name: "Transistor", states: 1, colors: 6,
+      table: { 0: {
+        0:{w:1,t:"W",n:0}, 1:{w:2,t:"B",n:0}, 2:{w:3,t:"N",n:0},
+        3:{w:4,t:"R",n:0}, 4:{w:5,t:"S",n:0}, 5:{w:0,t:"L",n:0} } } },
+
+    { id: "steppedpyramid", name: "Stepped Pyramid", states: 2, colors: 2,
+      table: {
+        0: { 0:{w:0,t:"R",n:1}, 1:{w:0,t:"L",n:0} },
+        1: { 0:{w:1,t:"L",n:1}, 1:{w:1,t:"F",n:0} } } },
+
+    { id: "snowflakeish", name: "Snowflake-ish", states: 2, colors: 2,
+      table: {
+        0: { 0:{w:0,t:"R",n:1}, 1:{w:1,t:"R",n:1} },
+        1: { 0:{w:1,t:"L",n:1}, 1:{w:1,t:"L",n:0} } } },
+
+    { id: "goldenrect", name: "Golden Rectangle", states: 2, colors: 2,
+      table: {
+        0: { 0:{w:1,t:"L",n:1}, 1:{w:1,t:"L",n:1} },
+        1: { 0:{w:1,t:"R",n:1}, 1:{w:0,t:"F",n:0} } } },
+
+    { id: "coiledrope", name: "Coiled Rope", states: 2, colors: 2,
+      table: {
+        0: { 0:{w:1,t:"F",n:1}, 1:{w:1,t:"L",n:0} },
+        1: { 0:{w:1,t:"R",n:1}, 1:{w:0,t:"F",n:0} } } },
+
+    { id: "wormtrails", name: "Worm Trails", states: 2, colors: 2,
+      table: {
+        0: { 0:{w:1,t:"R",n:1}, 1:{w:1,t:"L",n:1} },
+        1: { 0:{w:1,t:"R",n:1}, 1:{w:0,t:"R",n:0} } } },
+
+    { id: "mazelike", name: "Maze-like Growth", states: 3, colors: 2,
+      table: {
+        0: { 0:{w:1,t:"L",n:1}, 1:{w:1,t:"L",n:1} },
+        1: { 0:{w:1,t:"F",n:0}, 1:{w:0,t:"F",n:2} },
+        2: { 0:{w:0,t:"L",n:1}, 1:{w:1,t:"F",n:1} } } },
+  ];
+
+  // =========================================================================
+  // ENGINE
+  // =========================================================================
+  const DIR_NAMES = ["N", "E", "S", "W"];
+  const DIR_DELTA = { N: [0, -1], E: [1, 0], S: [0, 1], W: [-1, 0] };
+
+  function applyTurn(headingIdx, turnCode) {
+    switch (turnCode) {
+      case "R": return (headingIdx + 1) % 4;
+      case "L": return (headingIdx + 3) % 4;
+      case "B": return (headingIdx + 2) % 4;
+      case "N": return 0;
+      case "E": return 1;
+      case "S": return 2;
+      case "W": return 3;
+      case "F": case "H": default: return headingIdx;
+    }
+  }
+
+  const CELL_SIZE = 6;         // pixels per cell — fixed, per spec
+  const COLONY_SIZE = 5;       // within the decided 2-8 range
+
+  const state = {
+    ruleIndex: 0,
+    hueOffset: Math.floor(Math.random() * 360),
+    stepsPerSecond: 60,
+    paused: false,
+    gridW: 1, gridH: 1,
+    grid: null,          // Uint8Array of color indices
+    pixels: null,         // Uint8Array RGBA, same cell count * 4
+    turmites: [],
+    palette: [],
+  };
+
+  function currentRule() { return RULES[state.ruleIndex]; }
+
+  function hsvToRgb(h, s, v) {
+    const i = Math.floor(h * 6);
+    const f = h * 6 - i;
+    const p = v * (1 - s);
+    const q = v * (1 - f * s);
+    const t = v * (1 - (1 - f) * s);
+    let r, g, b;
+    switch (i % 6) {
+      case 0: r=v; g=t; b=p; break;
+      case 1: r=q; g=v; b=p; break;
+      case 2: r=p; g=v; b=t; break;
+      case 3: r=p; g=q; b=v; break;
+      case 4: r=t; g=p; b=v; break;
+      default: r=v; g=p; b=q; break;
+    }
+    return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
+  }
+
+  function buildPalette() {
+    const n = currentRule().colors;
+    const pal = new Array(n);
+    pal[0] = [9, 9, 13]; // background — near-black, cool tint
+    for (let i = 1; i < n; i++) {
+      const hue = ((state.hueOffset + (360 * (i - 1)) / Math.max(1, n - 1)) % 360) / 360;
+      pal[i] = hsvToRgb(hue, 0.72, 0.95);
+    }
+    state.palette = pal;
+  }
+
+  function randomTurmite(w, h) {
+    return {
+      x: Math.floor(Math.random() * w),
+      y: Math.floor(Math.random() * h),
+      heading: Math.floor(Math.random() * 4),
+      cellState: 0,
+      halted: false,
+    };
+  }
+
+  function resetColony() {
+    state.turmites = [];
+    for (let i = 0; i < COLONY_SIZE; i++) {
+      state.turmites.push(randomTurmite(state.gridW, state.gridH));
+    }
+  }
+
+  function clearGrid() {
+    state.grid.fill(0);
+    const bg = state.palette[0];
+    for (let p = 0; p < state.pixels.length; p += 4) {
+      state.pixels[p] = bg[0]; state.pixels[p+1] = bg[1];
+      state.pixels[p+2] = bg[2]; state.pixels[p+3] = 255;
+    }
+  }
+
+  function repaintAllFromGrid() {
+    // Used after a palette recolor — indices unchanged, colors remapped.
+    for (let idx = 0; idx < state.grid.length; idx++) {
+      const c = state.palette[state.grid[idx]] || state.palette[0];
+      const p = idx * 4;
+      state.pixels[p] = c[0]; state.pixels[p+1] = c[1];
+      state.pixels[p+2] = c[2]; state.pixels[p+3] = 255;
+    }
+  }
+
+  function writeCell(idx, colorIndex) {
+    state.grid[idx] = colorIndex;
+    const c = state.palette[colorIndex] || state.palette[0];
+    const p = idx * 4;
+    state.pixels[p] = c[0]; state.pixels[p+1] = c[1];
+    state.pixels[p+2] = c[2]; state.pixels[p+3] = 255;
+  }
+
+  function stepTurmite(t) {
+    if (t.halted) return;
+    const w = state.gridW, h = state.gridH;
+    const idx = t.y * w + t.x;
+    const color = state.grid[idx];
+    const rule = currentRule();
+    const stateTable = rule.table[t.cellState];
+    let action = stateTable && stateTable[color];
+    if (!action) action = { w: color, t: "F", n: t.cellState }; // sparse-table fallback: no-op
+
+    writeCell(idx, action.w);
+
+    if (action.n === "HALT") { t.halted = true; return; }
+    t.cellState = action.n;
+
+    if (action.t !== "H") {
+      t.heading = applyTurn(t.heading, action.t);
+      const d = DIR_DELTA[DIR_NAMES[t.heading]];
+      t.x = ((t.x + d[0]) % w + w) % w;
+      t.y = ((t.y + d[1]) % h + h) % h;
+    }
+  }
+
+  function simStep() {
+    for (let i = 0; i < state.turmites.length; i++) stepTurmite(state.turmites[i]);
+  }
+
+  function allHalted() {
+    return state.turmites.every(t => t.halted);
+  }
+
+  // =========================================================================
+  // RENDERER (three.js)
+  // =========================================================================
+  let renderer, scene, camera, mesh, texture;
+
+  function initRenderer() {
+    renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "low-power" });
+    renderer.setPixelRatio(1); // deliberate: chunky pixels, lighter GPU load
+    document.body.appendChild(renderer.domElement);
+
+    scene = new THREE.Scene();
+    camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    camera.position.z = 1;
+
+    const geo = new THREE.PlaneGeometry(2, 2);
+    const mat = new THREE.MeshBasicMaterial({ map: null });
+    mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
+  }
+
+  function rebuildGridAndTexture() {
+    state.gridW = Math.max(8, Math.floor(window.innerWidth / CELL_SIZE));
+    state.gridH = Math.max(8, Math.floor(window.innerHeight / CELL_SIZE));
+    state.grid = new Uint8Array(state.gridW * state.gridH);
+    state.pixels = new Uint8Array(state.gridW * state.gridH * 4);
+
+    buildPalette();
+    clearGrid();
+    resetColony();
+
+    if (texture) texture.dispose();
+    texture = new THREE.DataTexture(state.pixels, state.gridW, state.gridH, THREE.RGBAFormat, THREE.UnsignedByteType);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.needsUpdate = true;
+    mesh.material.map = texture;
+    mesh.material.needsUpdate = true;
+
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  function renderFrame() {
+    texture.needsUpdate = true;
+    renderer.render(scene, camera);
+  }
+
+  // =========================================================================
+  // MAIN LOOP — fixed step rate, decoupled from display rate; only redraws
+  // when the grid actually changed; pauses entirely when the tab is hidden.
+  // =========================================================================
+  let lastTime = 0, accumulator = 0;
+
+  function loop(now) {
+    requestAnimationFrame(loop);
+    if (document.hidden) { lastTime = now; return; }
+
+    const dt = lastTime ? (now - lastTime) / 1000 : 0;
+    lastTime = now;
+
+    if (state.paused) return;
+
+    accumulator += dt;
+    const stepInterval = 1 / state.stepsPerSecond;
+    let stepped = false;
+
+    while (accumulator >= stepInterval) {
+      accumulator -= stepInterval;
+      simStep();
+      stepped = true;
+      if (allHalted()) { state.paused = true; setStatus("halted"); break; }
+    }
+
+    if (stepped) renderFrame();
+  }
+
+  // =========================================================================
+  // HUD
+  // =========================================================================
+  const hud = document.getElementById("hud");
+  const hudRule = document.getElementById("hud-rule");
+  const hudStatus = document.getElementById("hud-status");
+  const hudFlash = document.getElementById("hud-flash");
+  let dimTimer = null, flashTimer = null;
+
+  function refreshHudText() {
+    hudRule.textContent = currentRule().name;
+    setStatus(state.paused ? "paused" : "running");
+  }
+
+  function setStatus(extra) {
+    hudStatus.textContent =
+      `${state.turmites.length} turmites · ${state.stepsPerSecond}/s · hue ${state.hueOffset}° · ${extra}`;
+  }
+
+  function wakeHud() {
+    hud.classList.remove("dim");
+    clearTimeout(dimTimer);
+    dimTimer = setTimeout(() => hud.classList.add("dim"), 4000);
+  }
+
+  function flash(msg) {
+    hudFlash.textContent = msg;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => { hudFlash.textContent = ""; }, 1800);
+  }
+
+  // =========================================================================
+  // PRESETS — window.storage slots (personal) + JSON file export/import
+  // =========================================================================
+  function currentPreset() {
+    return {
+      ruleId: currentRule().id,
+      hueOffset: state.hueOffset,
+      stepsPerSecond: state.stepsPerSecond,
+      colonySize: COLONY_SIZE,
+    };
+  }
+
+  function applyPreset(preset) {
+    const idx = RULES.findIndex(r => r.id === preset.ruleId);
+    state.ruleIndex = idx >= 0 ? idx : 0;
+    state.hueOffset = ((preset.hueOffset % 360) + 360) % 360;
+    state.stepsPerSecond = preset.stepsPerSecond || 60;
+    rebuildGridAndTexture();
+    refreshHudText();
+    renderFrame();
+  }
+
+  async function saveSlot(n) {
+    try {
+      const res = await window.storage.set(`preset:slot${n}`, JSON.stringify(currentPreset()), false);
+      flash(res ? `saved slot ${n}` : `save failed`);
+    } catch (e) { flash(`save failed`); }
+  }
+
+  async function loadSlot(n) {
+    try {
+      const res = await window.storage.get(`preset:slot${n}`, false);
+      if (!res) { flash(`slot ${n} empty`); return; }
+      applyPreset(JSON.parse(res.value));
+      flash(`loaded slot ${n}`);
+    } catch (e) { flash(`slot ${n} empty`); }
+  }
+
+  function exportPreset() {
+    const blob = new Blob([JSON.stringify(currentPreset(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "spider-vortex-preset.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    flash("exported preset.json");
+  }
+
+  function importPreset() {
+    document.getElementById("importInput").click();
+  }
+
+  document.getElementById("importInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        applyPreset(JSON.parse(reader.result));
+        flash("imported preset");
+      } catch (err) { flash("bad preset file"); }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  });
+
+  // =========================================================================
+  // INPUT
+  // =========================================================================
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+    else document.exitFullscreen();
+  }
+
+  window.addEventListener("keydown", (e) => {
+    wakeHud();
+    const digit = /^Digit([1-5])$/.exec(e.code);
+
+    switch (e.code) {
+      case "Space":
+        state.paused = !state.paused;
+        refreshHudText();
+        renderFrame();
+        e.preventDefault();
+        break;
+      case "BracketRight":
+        state.stepsPerSecond = Math.min(2000, Math.round(state.stepsPerSecond * 1.5) + 1);
+        setStatus(state.paused ? "paused" : "running");
+        break;
+      case "BracketLeft":
+        state.stepsPerSecond = Math.max(1, Math.round(state.stepsPerSecond / 1.5));
+        setStatus(state.paused ? "paused" : "running");
+        break;
+      case "KeyR":
+        resetColony();
+        clearGrid();
+        state.paused = false;
+        refreshHudText();
+        renderFrame();
+        break;
+      case "KeyN":
+        state.ruleIndex = (state.ruleIndex + 1) % RULES.length;
+        state.paused = false;
+        rebuildGridAndTexture();
+        refreshHudText();
+        renderFrame();
+        break;
+      case "KeyC":
+        state.hueOffset = Math.floor(Math.random() * 360);
+        buildPalette();
+        repaintAllFromGrid();
+        setStatus(state.paused ? "paused" : "running");
+        renderFrame();
+        break;
+      case "KeyF":
+        toggleFullscreen();
+        break;
+      case "KeyE":
+        exportPreset();
+        break;
+      case "KeyI":
+        importPreset();
+        break;
+      default:
+        if (digit) {
+          const n = digit[1];
+          if (e.shiftKey) saveSlot(n); else loadSlot(n);
+        }
+    }
+  });
+
+  window.addEventListener("resize", () => {
+    rebuildGridAndTexture();
+    refreshHudText();
+    renderFrame();
+  });
+
+  // =========================================================================
+  // BOOT
+  // =========================================================================
+  initRenderer();
+  rebuildGridAndTexture();
+  refreshHudText();
+  renderFrame();
+  wakeHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
