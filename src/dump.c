@@ -11,6 +11,12 @@
 
 #include "rules.h"
 
+/* Debug capture deliberately stores the logical six-color tape rather than
+ * Linux RGB ink. That keeps captures portable and suitable for cycle/stagnation
+ * analysis independent of presentation effects. */
+
+/* FNV-1a gives each full tape page a cheap stable fingerprint. Equal hashes are
+ * useful for spotting repeated states; changed_cells adds a direct local delta. */
 static uint64_t fnv1a64(const uint8_t *data, size_t n)
 {
     uint64_t hash = UINT64_C(14695981039346656037);
@@ -65,6 +71,8 @@ int dump_capture_init(DumpCapture *capture, const World *world, uint32_t seed,
     capture->world_width = world->width;
     capture->world_height = world->height;
 
+    /* Parallel arrays make one ring slot represent a complete point-in-time
+     * sample while keeping the raw page bytes contiguous for file output. */
     capture->world_pages = calloc(pages, capture->cells * sizeof(uint8_t));
     capture->page_meta = calloc(pages, sizeof(*capture->page_meta));
     capture->ant_meta = calloc(pages * capture->ant_slots, sizeof(*capture->ant_meta));
@@ -109,6 +117,10 @@ static void capture_one(DumpCapture *capture, const World *world, const AntColon
 {
     const size_t slot = capture->next_page;
     uint8_t *dst = capture->world_pages + slot * capture->cells;
+
+    /* Snapshot is intentionally non-transactional: workers continue running,
+     * so a page is a coherent array of atomic cell observations rather than a
+     * globally frozen instant. That matches the live universe semantics. */
     for (size_t i = 0; i < capture->cells; ++i) {
         dst[i] = world_load(world, i);
     }
@@ -132,6 +144,8 @@ static void capture_one(DumpCapture *capture, const World *world, const AntColon
     meta->quantum = (uint32_t)scheduler_get_quantum((Scheduler *)scheduler);
     meta->min_service = (uint32_t)scheduler_get_min_service((Scheduler *)scheduler);
 
+    /* Scheduler-owned fair credit is sampled under its mutex; most other ant
+     * fields are atomic and can be observed directly. */
     DumpAntMeta *ants = capture->ant_meta + slot * capture->ant_slots;
     pthread_mutex_lock((pthread_mutex_t *)&scheduler->lock);
     for (size_t i = 0; i < capture->ant_slots; ++i) {
@@ -158,6 +172,8 @@ static void capture_one(DumpCapture *capture, const World *world, const AntColon
     }
     pthread_mutex_unlock((pthread_mutex_t *)&scheduler->lock);
 
+    /* Overwrite the oldest slot once full. next_page always points at the slot
+     * to be replaced on the next capture. */
     capture->next_page = (slot + 1) % capture->page_capacity;
     if (capture->page_count < capture->page_capacity) ++capture->page_count;
     capture->next_capture_at = now + capture->interval_seconds;
@@ -199,9 +215,10 @@ static void make_timestamp(char *buf, size_t size)
     strftime(buf, size, "%Y%m%d-%H%M%S", &tm);
 }
 
+/* Convert a physical ring slot into chronological output order. When the ring
+ * is full, next_page is the oldest page because it is the next one to replace. */
 static size_t chronological_slot(const DumpCapture *capture, size_t ordinal)
 {
-    /* Oldest first. */
     size_t first = (capture->page_count == capture->page_capacity) ? capture->next_page : 0;
     return (first + ordinal) % capture->page_capacity;
 }
@@ -236,6 +253,7 @@ int dump_write(const DumpCapture *capture, const World *world, const AntColony *
         return -1;
     }
 
+    /* Manifest is text for quick inspection; raw pages stay compact binary. */
     fprintf(manifest, "TURMITE UNIVERSE DEBUG DUMP\n");
     write_heading(manifest, "format", "v1");
     fprintf(manifest, "seed=0x%08" PRIX32 "\n", capture->seed);
