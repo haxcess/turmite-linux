@@ -208,7 +208,9 @@ int renderer_init(Renderer *renderer, int width, int height, int cell_size,
     renderer->pixels = malloc((size_t)(width / cell_size) * (size_t)(height / cell_size) * sizeof(uint32_t));
     if (!renderer->pixels) return -1;
 
-    renderer->texture = SDL_CreateTexture(renderer->renderer, SDL_PIXELFORMAT_RGBA8888,
+    /* renderer->pixels stores packed 0xAARRGGBB words. ARGB8888 matches that
+     * integer layout; using RGBA8888 made the 0xFF alpha byte appear as red. */
+    renderer->texture = SDL_CreateTexture(renderer->renderer, SDL_PIXELFORMAT_ARGB8888,
         SDL_TEXTUREACCESS_STREAMING, width / cell_size, height / cell_size);
     if (!renderer->texture) return -1;
     SDL_SetTextureScaleMode(renderer->texture, SDL_ScaleModeNearest);
