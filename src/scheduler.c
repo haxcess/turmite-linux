@@ -142,6 +142,10 @@ Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us, size_t *granted_qu
             size_t required = atomic_load_explicit(&scheduler->min_service, memory_order_relaxed);
             if (required == 0) required = 1;
             if (required > q) required = q;
+            /* A full bucket must always be eligible for normal service. */
+            const size_t capacity = atomic_load_explicit(&ant->token_capacity_fp,
+                                                         memory_order_relaxed) >> TOKEN_FP_SHIFT;
+            if (required > capacity) required = capacity;
             if (!(f & ANT_F_DRAINING) && whole_tokens < required) continue;
 
             uint32_t weight = atomic_load_explicit(&ant->weight, memory_order_relaxed);

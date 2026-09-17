@@ -126,7 +126,8 @@ For controlled benchmark comparisons, see [EXPERIMENTS.md](EXPERIMENTS.md). Prof
 | `src/main.c` | Monitor discovery, independent controllers/workers, frame handoff, SDL event routing |
 | `src/renderer_sdl.c`, `src/renderer_sdl.h` | SDL windows, prepared-pixel presentation, developer HUD |
 | `src/dump.c`, `tools/analyze_dump.py` | Logical-world capture and offline inspection |
-| `turmite-ruleTesting.html` | Standalone browser rule playground; not the concurrent C runtime |
+| `rule-lab.html`, `tools/rule-*.js` | Offline single-ant rule editor, seeded generator, and C export |
+| `turmite-ruleTesting.html` | Historical visual playground; its rules differ from the C catalogue |
 | `stm32/` | Proposed dual-core design and occupancy helper scaffold |
 
 The existing STM32 design targets H745/H747 with one worker per core and separate FreeRTOS instances. No board, specific panel, Cube project, linker setup, or complete firmware build is present. The display target is six-color e-ink, roughly 8×6 inches; controller, pixel resolution, interface, and refresh requirements remain open. The shared rendering layer is ready for a panel backend, but no e-ink driver is implemented. See [stm32/README.md](stm32/README.md) and [stm32/INTEGRATION.md](stm32/INTEGRATION.md).
@@ -146,3 +147,11 @@ git diff
 ```
 
 Applying a patch changes working files; it does not stage, commit, or publish them. Publishing to GitHub is a manual maintainer step.
+
+## Rule lab and stationary ants
+
+Open [rule-lab.html](rule-lab.html) directly in a browser; keep its `tools/` folder alongside it. It runs offline without dependencies. Load a built-in rule or choose 1–4 states and 1–6 colors, set a seed, and generate a table. Edit actions, run or single-step on an empty wrapping canvas, and inspect the ant marker and activity counters. Copy/download the C initializer into `RULES[]` in `src/rules.c`, choosing a unique ID, then rebuild. JSON import/export preserves candidate tables. See [RULE_LAB.md](RULE_LAB.md).
+
+`make rule-catalog` refreshes the checked-in browser catalogue and palette from C after source edits. `make rule-lab-test` additionally requires Node.js and compares the JavaScript interpreter with C reference traces. `make capacity-test` checks scheduling without SDL.
+
+Large batches previously left ants with small token buckets permanently undispatched: with `--quantum 790 --min-service 1000`, capacity below 790 could never satisfy the threshold. Such ants still occupied cells despite leaving no trail. Minimum batching now respects each ant's capacity. Visible trails still do not count ants: some rules remain local, erase cells, or cross unsupported colors without changing them.

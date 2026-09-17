@@ -2,3 +2,12 @@ turmite
 src/*.o
 src/*.d
 turmite-dumps/
+
+# Rule-lab build and test products
+/tools/export_rule_catalog
+/tools/rule-catalog.js.tmp
+/tests/scheduler_capacity_test
+/tests/rule_trace
+/tests/rule-traces.js
+/tests/generated_rules_check.c
+/tests/generated_rules_check

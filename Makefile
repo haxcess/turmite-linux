@@ -18,7 +18,7 @@ SRC := \
 OBJ := $(SRC:.c=.o)
 TARGET := turmite
 
-.PHONY: all clean multi-window-test render-test sdl-test core-test tsan-test struct-report bench perf-stat perf-stat-unbatched perf-stat-1w perf-stat-saturated perf-record perf-record-unbatched perf-record-1w perf-record-saturated perf-report
+.PHONY: all clean capacity-test rule-catalog rule-lab-test multi-window-test render-test sdl-test core-test tsan-test struct-report bench perf-stat perf-stat-unbatched perf-stat-1w perf-stat-saturated perf-record perf-record-unbatched perf-record-1w perf-record-saturated perf-report
 
 all: $(TARGET)
 
@@ -65,10 +65,11 @@ tests/bench: tests/bench.c src/rng.c src/rules.c src/world.c src/ant.c src/sched
 	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $^ -pthread -lm -o $@
 
 clean:
-	rm -f $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench tests/render_test tests/renderer_sdl_test tests/multi_window_test tests/multi_monitor_app_test
+	rm -f $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench tests/render_test tests/renderer_sdl_test tests/multi_window_test tests/multi_monitor_app_test tests/scheduler_capacity_test tests/rule_trace tests/rule-traces.js tools/export_rule_catalog tests/generated_rules_check.c tests/generated_rules_check
 
-core-test: tests/headless_smoke
+core-test: tests/headless_smoke tests/scheduler_capacity_test
 	./tests/headless_smoke
+	./tests/scheduler_capacity_test
 
 tests/headless_smoke: tests/headless_smoke.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c
 	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $^ -pthread -lm -o $@
@@ -108,3 +109,29 @@ tests/multi_window_test: tests/multi_window_test.c $(SRC) $(wildcard src/*.h)
 
 tests/multi_monitor_app_test: tests/multi_monitor_app_test.c $(SRC) $(wildcard src/*.h)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I src tests/multi_monitor_app_test.c $(filter-out src/main.c,$(SRC)) $(LDLIBS) -Wl,--wrap=SDL_GetNumVideoDisplays,--wrap=SDL_GetDisplayBounds,--wrap=SDL_CreateWindow,--wrap=SDL_RenderPresent,--wrap=SDL_DestroyWindow,--wrap=SDL_PollEvent,--wrap=renderer_present -o $@
+
+# C regression: large minimum batches must not permanently park small buckets.
+capacity-test: tests/scheduler_capacity_test
+	./tests/scheduler_capacity_test
+
+tests/scheduler_capacity_test: tests/scheduler_capacity_test.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter %.c,$^) -pthread -lm -o $@
+
+tools/export_rule_catalog: tools/export_rule_catalog.c src/rules.c src/renderer.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter %.c,$^) -o $@
+
+# Checked-in JS permits offline use without compiling first. Refresh after C edits.
+rule-catalog: tools/export_rule_catalog
+	./tools/export_rule_catalog > tools/rule-catalog.js.tmp
+	mv tools/rule-catalog.js.tmp tools/rule-catalog.js
+
+tests/rule_trace: tests/rule_trace.c src/rng.c src/rules.c src/world.c src/ant.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter %.c,$^) -pthread -lm -o $@
+
+NODE ?= node
+rule-lab-test: rule-catalog tests/rule_trace
+	./tests/rule_trace > tests/rule-traces.js
+	$(NODE) tests/rule_lab_test.js
+	$(NODE) tests/export_generated_rules.js > tests/generated_rules_check.c
+	$(CC) $(CFLAGS) -I src tests/generated_rules_check.c -o tests/generated_rules_check
+	./tests/generated_rules_check

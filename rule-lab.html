@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turmite Rule Lab</title>
+<style>
+  :root { color-scheme:dark; font:15px system-ui,sans-serif; background:#002b36; color:#c5c9bc }
+  body { margin:0 auto; padding:24px; max-width:1500px }
+  h1 { margin:0; color:#e3dbc4; font-weight:500 } h2 { font-size:1.1rem; color:#e3dbc4 }
+  p { line-height:1.5; max-width:90ch } main { display:grid; grid-template-columns:minmax(320px,1fr) minmax(340px,1fr); gap:24px }
+  section { background:#073642; padding:18px; border-radius:8px; margin-bottom:16px }
+  label { display:inline-flex; gap:6px; align-items:center; margin:5px 10px 5px 0; flex-wrap:wrap }
+  input,select,button,textarea { font:inherit; color:inherit; background:#002b36; border:1px solid #586e75; border-radius:4px; padding:7px }
+  input[type=number] { width:65px } button { cursor:pointer; margin:4px 4px 4px 0 } button:hover { border-color:#b58900 }
+  :focus-visible { outline:2px solid #b58900; outline-offset:2px } input[type=checkbox] { accent-color:#859900 }
+  canvas { width:100%; image-rendering:pixelated; background:#073642; border:1px solid #586e75; box-sizing:border-box }
+  textarea { width:100%; box-sizing:border-box; font:12px/1.5 monospace; resize:vertical }
+  table { border-collapse:collapse; width:100% } td,th { text-align:left; padding:5px; border-bottom:1px solid #586e75 }
+  table select { padding:4px } .scroll { max-height:430px; overflow:auto }
+  #status { font-family:monospace; white-space:pre-wrap; line-height:1.6 }
+  #message { min-height:1.5em; color:#e5bd66 } small { color:#a6b3b1 }
+  @media(max-width:850px) { main { grid-template-columns:1fr } body { padding:12px } }
+</style>
+<h1>Turmite Rule Lab</h1>
+<p>Explore one rule on an empty, wrapping canvas. Generate a transition table, edit it, and export a C catalogue entry. Runs locally with no external libraries.</p>
+<p id="message" role="status" aria-live="polite"></p>
+<main><div>
+<section>
+  <h2>Choose or generate</h2>
+  <label>Catalogue <select id="preset"></select></label><button id="load">Load rule</button><br>
+  <label>States <input id="states" type="number" min="1" max="4" value="2"></label>
+  <label>Colors <input id="colors" type="number" min="1" max="6" value="6"></label>
+  <label>Seed <input id="seed" value="12345678" size="12"></label>
+  <label><input id="extended" type="checkbox">Allow hold and compass turns</label><br>
+  <button id="generate">Generate</button><button id="newseed">New seed</button><button id="mutate">Mutate one action</button>
+  <p><small>The same dimensions, options, and seed reproduce a table. Random rules are candidates, not a guarantee of interesting or previously undiscovered behavior. Generation never adds HALT.</small></p>
+</section>
+<section>
+  <h2>Edit the rule</h2>
+  <label>ID <input id="ruleid" size="20"></label><label>Name <input id="rulename" size="25"></label>
+  <p><small>State + read color → write, turn, next state. Action edits clear the canvas and pause. F forward · R right · L left · B reverse · H hold · N/E/S/W compass. HALT stops after writing and turning, before moving.</small></p>
+  <div class="scroll"><table><thead><tr><th>State</th><th>Read</th><th>Write</th><th>Turn</th><th>Next</th><th>HALT</th></tr></thead><tbody id="actions"></tbody></table></div>
+</section>
+<section>
+  <h2>Export / import</h2>
+  <p><small>Paste this entry inside <code>RULES[]</code> in <code>src/rules.c</code>, give it a unique ID, and rebuild. It uses the existing A/HLT macros. JSON stores the rule, not a simulation checkpoint.</small></p>
+  <textarea id="coutput" rows="10" readonly aria-label="C rule initializer"></textarea>
+  <button id="copy">Copy C</button><button id="download">Download C</button><button id="jsonexport">Rule to JSON</button>
+  <textarea id="json" rows="5" aria-label="Rule JSON" placeholder="Paste a rule JSON object here"></textarea>
+  <button id="jsonimport">Import JSON</button>
+</section>
+</div><div>
+<section>
+  <h2>Single-ant experiment</h2>
+  <label>Width <input id="width" type="number" min="16" max="1024" value="256"></label>
+  <label>Height <input id="height" type="number" min="16" max="1024" value="192"></label>
+  <label>Start state <input id="startstate" type="number" min="0" max="3" value="0"></label>
+  <label>Heading <select id="heading"><option value="0">North</option><option value="1">East</option><option value="2">South</option><option value="3">West</option></select></label>
+  <div><button id="run">Run</button><button id="step">Step once</button><button id="batch">Step 1,000</button><button id="reset">Clear / reset</button></div>
+  <label>Steps per frame <input id="speed" type="number" min="1" max="100000" value="1000"></label>
+  <label><input id="marker" type="checkbox" checked>Show ant marker</label>
+  <canvas id="canvas" width="256" height="192" aria-label="Single turmite canvas"></canvas>
+  <p id="status" aria-live="off"></p>
+  <p><small>The white cross is an overlay, never a tape write. Counters expose movement without visible ink and small or stationary patterns. Low coverage alone does not prove a broken rule.</small></p>
+  <p><small>This tests C write/turn/state/move behavior, toroidal wrapping, and unsupported-color fallback. It has no tokens, collisions, or reincarnation. HALT stops here; Linux reincarnates instead. Linux also randomizes the starting state and heading.</small></p>
+</section>
+</div></main>
+<script src="tools/rule-catalog.js"></script>
+<script src="tools/rule-engine.js"></script>
+<script src="tools/rule-lab.js"></script>
+</html>

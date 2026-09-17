@@ -28,7 +28,7 @@ Token accrual is lazy at scheduler boundaries using monotonic microseconds. Fres
 
 Fresh and mutated ants start with full buckets. `--token-rate-divisor` slows accrual without changing inherited per-ant rates. The benchmark additionally exposes a rate multiplier. Accrual clamps elapsed time to one second per update.
 
-`quantum` caps the instructions in a lease. A normal ant needs at least `min(min_service, quantum)` whole tokens before dispatch; its grant can exceed that threshold, up to its available tokens and quantum. Draining ants bypass the batching threshold. If no work is eligible, workers use a condition-variable timed wait of approximately 1 ms.
+`quantum` caps the instructions in a lease. A normal ant needs at least `min(min_service, quantum, floor(token_capacity))` whole tokens before dispatch; its grant can exceed that threshold, up to its available tokens and quantum. Draining ants bypass the batching threshold. If no work is eligible, workers use a condition-variable timed wait of approximately 1 ms.
 
 Per-universe application defaults are 8 ants, 2 ant workers, quantum 32, minimum service 16, and divisor 1. The command line permits 1..8 workers and quantum/minimum-service values of 1..4096. The standalone benchmark has separate defaults and limits documented in [MEMORY_AND_PERF.md](MEMORY_AND_PERF.md).
 
@@ -87,7 +87,7 @@ Live captures are not globally synchronized snapshots. Published ant positions c
 ## Remaining work and boundaries
 
 - Check collision-loser execution and population-pressure semantics with focused tests before porting them.
-- A batching threshold above an ant's capacity prevents normal dispatch for that ant; there is no per-ant capacity clamp on the threshold.
+- Minimum batching is capped at each ant's whole-token capacity so full buckets remain eligible even when the configured minimum exceeds capacity.
 - The one-second accrual clamp can discard elapsed refill time with large slow-motion divisors, where a bucket may take longer than one second to fill.
 - Rule-driven scheduling mutations, additional scheduler policies, and a gene-pool/bookmark interface are not implemented. `RuleAction` currently contains only write, turn, next-state, and halt fields.
 - STM32 timing, entropy, scheduler synchronization, shared-state layout, startup, lifecycle, and display integration remain to be implemented. H745/H747 is the existing proposed target; the board and specific panel remain unselected. The display target is six-color e-ink, approximately 8×6 inches, with pixel resolution and interface still open. See [stm32/README.md](stm32/README.md).

@@ -19,7 +19,7 @@ This is the current queue. [OPTIMIZATION_NOTES.md](OPTIMIZATION_NOTES.md) preser
 
 1. Check collision-loser execution: the instruction loop currently ignores a failed movement claim and continues the grant without rechecking clobbered status. Establish the intended behavior and cover it with focused tests.
 2. Check best-effort population controls under leases/collisions, and handle random-placement failure before relying on exact population counts.
-3. Check batching thresholds above bucket capacity and elapsed-time accrual with large slow-motion divisors.
+3. Check elapsed-time accrual with large slow-motion divisors. Minimum batching is now clamped to each ant's capacity and covered by a dispatch regression test.
 4. Correct single-page dump change counts if those captures need useful deltas; decide which additional metadata is needed for diagnostics.
 
 The existing smoke test validates final occupancy and unchanged population during a short two-worker run. It does not settle these instruction-level, lifecycle, or embedded synchronization questions.

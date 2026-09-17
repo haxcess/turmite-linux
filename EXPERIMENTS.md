@@ -24,7 +24,7 @@ These windowed runs keep dimensions and normal batching fixed while varying the 
 ./turmite --display 0 --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 256
 ```
 
-The effective minimum is `min(min_service, quantum)`. Repeat with `--min-service 1` to isolate unbatched behavior. Watch collisions and visible structure; raw instruction throughput alone does not describe the artwork.
+The effective minimum is `min(min_service, quantum, floor(token_capacity))`. Repeat with `--min-service 1` to isolate unbatched behavior. Watch collisions and visible structure; raw instruction throughput alone does not describe the artwork.
 
 For slow, bursty motion:
 
