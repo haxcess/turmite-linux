@@ -24,8 +24,9 @@ int main(void)
     renderer_render(&renderer, &frame, &hud);
     assert(SDL_RenderReadPixels(renderer.renderer, NULL, SDL_PIXELFORMAT_ARGB8888,
                                 pixels, 3 * (int)sizeof(*pixels)) == 0);
-    for (size_t i = 0; i < 6; ++i) assert(pixels[i] == 0xff000000u);
+    for (size_t i = 0; i < 6; ++i) assert(pixels[i] == (0xff000000u | RENDER_BASE_PALETTE[0]));
     renderer_destroy(&renderer);
+    renderer_shutdown();
     puts("SDL render ok: fixed-palette readback and cleared frame");
     return 0;
 }

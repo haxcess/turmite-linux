@@ -98,3 +98,9 @@ The subsequent rendering refactor removes the ink plane and palette from `World`
 `renderer.h` / `renderer.c` now define a platform-independent, caller-owned frame of logical indices and allocation-free RGB or display-code conversion. `renderer_sdl.h` / `renderer_sdl.c` contain the SDL adapter and HUD. The Linux host samples world/HUD state before presenting; renderers do not access simulation objects. Core storage drops from about six to two bytes per cell. Graphical snapshots add one byte per cell outside the core, and SDL retains its four-byte pixel buffer.
 
 The display target is now six-color e-ink at roughly 8×6 inches. Hardware and resolution remain unselected; the code-map interface is not a panel driver. Earlier performance measurements above have not been re-established for this refactor.
+
+## Independent Linux universes per monitor
+
+The multi-monitor implementation supports one universe per monitor detected at startup. Current defaults are a single normal window on display 0 with its HUD hidden; `--fullscreen-all` opts into all-monitor operation and `--fullscreen` fills only the selected display. Each universe has its own ant workers and a controller for lifecycle, captures, and CPU frame conversion. Main owns SDL events and presentation. Three prepared frames per universe permit latest-frame handoff without blocking the producer on uploads; obsolete unread frames are dropped. The palette and simulation instruction path are unchanged.
+
+Graphical presentation storage is now 13 bytes per cell per universe (one index snapshot plus three ARGB frames), excluding SDL allocations. Worker counts and dump rings are also per universe. This is an orchestration change, not a measured throughput improvement; the older single-universe benchmark results do not characterize multi-monitor load.

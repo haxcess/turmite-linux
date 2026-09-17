@@ -18,7 +18,7 @@ SRC := \
 OBJ := $(SRC:.c=.o)
 TARGET := turmite
 
-.PHONY: all clean render-test sdl-test core-test tsan-test struct-report bench perf-stat perf-stat-unbatched perf-stat-1w perf-stat-saturated perf-record perf-record-unbatched perf-record-1w perf-record-saturated perf-report
+.PHONY: all clean multi-window-test render-test sdl-test core-test tsan-test struct-report bench perf-stat perf-stat-unbatched perf-stat-1w perf-stat-saturated perf-record perf-record-unbatched perf-record-1w perf-record-saturated perf-report
 
 all: $(TARGET)
 
@@ -65,7 +65,7 @@ tests/bench: tests/bench.c src/rng.c src/rules.c src/world.c src/ant.c src/sched
 	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $^ -pthread -lm -o $@
 
 clean:
-	rm -f $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench tests/render_test tests/renderer_sdl_test
+	rm -f $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench tests/render_test tests/renderer_sdl_test tests/multi_window_test tests/multi_monitor_app_test
 
 core-test: tests/headless_smoke
 	./tests/headless_smoke
@@ -97,3 +97,14 @@ sdl-test: tests/renderer_sdl_test
 
 tests/renderer_sdl_test: tests/renderer_sdl_test.c src/renderer.c src/renderer_sdl.c src/renderer.h src/renderer_sdl.h src/colors.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I src tests/renderer_sdl_test.c src/renderer.c src/renderer_sdl.c $(shell pkg-config --libs sdl2) -o $@
+
+# Two independent universes/windows on SDL dummy video, without real monitors.
+multi-window-test: tests/multi_window_test tests/multi_monitor_app_test
+	SDL_VIDEODRIVER=dummy ./tests/multi_window_test
+	SDL_VIDEODRIVER=dummy ./tests/multi_monitor_app_test
+
+tests/multi_window_test: tests/multi_window_test.c $(SRC) $(wildcard src/*.h)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I src tests/multi_window_test.c $(filter-out src/main.c,$(SRC)) $(LDLIBS) -o $@
+
+tests/multi_monitor_app_test: tests/multi_monitor_app_test.c $(SRC) $(wildcard src/*.h)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I src tests/multi_monitor_app_test.c $(filter-out src/main.c,$(SRC)) $(LDLIBS) -Wl,--wrap=SDL_GetNumVideoDisplays,--wrap=SDL_GetDisplayBounds,--wrap=SDL_CreateWindow,--wrap=SDL_RenderPresent,--wrap=SDL_DestroyWindow,--wrap=SDL_PollEvent,--wrap=renderer_present -o $@

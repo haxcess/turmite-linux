@@ -4,17 +4,17 @@ This describes current storage and profiling interfaces. Earlier layouts and mea
 
 ## Per-cell storage
 
-Let `N = width × height` and `P = retained dump pages`. With the current host atomic sizes:
+For each universe, let `N = width × height` and `P = retained dump pages`. With the current host atomic sizes:
 
 | Storage | Bytes | Allocated in headless mode? |
 | --- | ---: | --- |
 | Logical six-color tape | `N` | Yes |
 | Occupancy index | `N` | Yes |
 | Graphical tape snapshot | `N` | No |
-| Renderer CPU staging pixels | `4N` | No |
+| Three prepared ARGB frames | `12N` | No |
 | Raw capture ring | `PN` | Yes, in the main application |
 
-Core storage is about `2N`; the graphical application uses about `(7 + P)N` before SDL-managed textures/framebuffers, metadata, stacks, and allocator overhead. Headless application storage is about `(2 + P)N`. The portable rendering functions allocate no memory themselves. The standalone benchmark and smoke test do not allocate dump rings or renderers.
+Core storage is about `2N`; each graphical universe uses about `(15 + P)N` before SDL-managed textures/framebuffers, metadata, stacks, and allocator overhead. Headless application storage is about `(2 + P)N`. The portable rendering functions allocate no memory themselves. The standalone benchmark and smoke test do not allocate dump rings or renderers.
 
 | World | Core planes (`2N`) | Default raw capture ring (`127N`) |
 | --- | ---: | ---: |
@@ -23,9 +23,11 @@ Core storage is about `2N`; the graphical application uses about `(7 + P)N` befo
 | 1920×1080 | 4,147,200 bytes | 263,347,200 bytes |
 | 3840×2160 | 16,588,800 bytes | 1,053,388,800 bytes |
 
-The main application creates a dump ring even when no dump is eventually written. `--dump-pages 1` reduces storage but makes `changed_cells` uninformative in the current implementation. Use at least 3 pages for change/cycle inspection.
+With multiple monitors, sum these costs over all universes and add each controller/worker thread stack. `--workers N` is per universe, not a process-wide pool. Use `--display N` to restrict a graphical run to one monitor.
 
-The six logical colors fit in three bits, but packing concurrent tape writes would change the independent-byte update protocol. Display transport buffers can use a separate encoding once a display is selected. The core now stores only tape plus occupancy at `2N`; ant writes update only the logical byte. A graphical host owns a stable `N`-byte snapshot, and SDL owns a `4N`-byte conversion buffer. An e-ink backend can map indices to controller codes without RGB, choosing full-frame or tile/row buffers according to its transport needs. See [RENDERING.md](RENDERING.md).
+The main application creates a dump ring per universe even when no dump is eventually written. `--dump-pages 1` reduces storage but makes `changed_cells` uninformative in the current implementation. Use at least 3 pages for change/cycle inspection.
+
+The six logical colors fit in three bits, but packing concurrent tape writes would change the independent-byte update protocol. Display transport buffers can use a separate encoding once a display is selected. The core now stores only tape plus occupancy at `2N`; ant writes update only the logical byte. Each graphical universe owns a stable `N`-byte snapshot and three `4N`-byte prepared frames. The controller performs capture/conversion while main uploads completed frames to SDL. The application does not use the synchronous SDL adapter's optional conversion buffer. An e-ink backend can map indices to controller codes without RGB, choosing full-frame or tile/row buffers according to its transport needs. See [RENDERING.md](RENDERING.md).
 
 ## Ant state and collision lookup
 
@@ -80,6 +82,8 @@ make perf-record-1w
 perf report -i perf-1w.data
 ```
 
-Recording creates `perf.data`, `perf-unbatched.data`, `perf-1w.data`, or `perf-saturated.data`, depending on the target. `make perf-report` reads only `perf.data`. Benchmark builds include `-O2 -g`; the current default application build omits `-g`.
+Recording creates `perf.data`, `perf-unbatched.data`, `perf-1w.data`, or `perf-saturated.data`, depending on the target. `make perf-report` reads only `perf.data`. Benchmark builds include `-O2 -g`; the current default application build also includes `-g`.
+
+Multi-monitor mode adds one controller and its own ant workers per monitor. Frame handoff drops obsolete unread frames; it does not make SDL uploads or presentation parallel. The standalone benchmark remains a single universe without rendering and does not measure aggregate multi-monitor costs.
 
 The checked-in V5/V6 reports and historical throughput figures describe earlier code. Reprofile after this separation: ant instructions no longer write RGB ink, and the Linux render loop now snapshots indices and converts them to fixed-palette pixels.

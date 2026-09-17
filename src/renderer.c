@@ -2,11 +2,11 @@
 
 const uint32_t RENDER_BASE_PALETTE[TURMITE_COLORS] = { // From Solarized palette, https://ethanschoonover.com/solarized/
     0x073642u, /* black */
-    0xEEE8D5u, /* white */
+    0x586E75u, /* white */
     0xDC322Fu, /* red */
     0xB58900u, /* yellow */
     0x859900u, /* green */
-    0x268BD2u  /* blue */
+    0x288BD2u  /* blue */
 };
 
 size_t render_frame_cells(const RenderFrame *frame)

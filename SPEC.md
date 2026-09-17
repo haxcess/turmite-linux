@@ -30,7 +30,7 @@ Fresh and mutated ants start with full buckets. `--token-rate-divisor` slows acc
 
 `quantum` caps the instructions in a lease. A normal ant needs at least `min(min_service, quantum)` whole tokens before dispatch; its grant can exceed that threshold, up to its available tokens and quantum. Draining ants bypass the batching threshold. If no work is eligible, workers use a condition-variable timed wait of approximately 1 ms.
 
-Application defaults are 8 ants, 2 workers, quantum 32, minimum service 16, and divisor 1. The command line permits 1..8 workers and quantum/minimum-service values of 1..4096. The standalone benchmark has separate defaults and limits documented in [MEMORY_AND_PERF.md](MEMORY_AND_PERF.md).
+Per-universe application defaults are 8 ants, 2 ant workers, quantum 32, minimum service 16, and divisor 1. The command line permits 1..8 workers and quantum/minimum-service values of 1..4096. The standalone benchmark has separate defaults and limits documented in [MEMORY_AND_PERF.md](MEMORY_AND_PERF.md).
 
 ## Occupancy, collisions, and mutation
 
@@ -54,31 +54,33 @@ These are best-effort requests against currently available ants. Busy leases can
 
 The universe generator and per-ant runtime generators use a 32-bit Galois LFSR with feedback mask `0x80200003`. Zero seeds are remapped. Linux entropy comes from `/dev/urandom`, with a process/time fallback; `--seed` supplies an explicit initial seed.
 
+For M selected displays, initial seed i is `base_seed XOR (0x9e3779b9 × i)` in 32-bit arithmetic, with zero remapped to 1. The first/only universe keeps the supplied seed; i is the window ordinal starting at zero, not its SDL display index. Each universe owns its RNG streams, scheduler, colony, tape, and capture ring.
+
 An explicit seed establishes initial RNG sequences, not deterministic concurrent execution. Timing affects token accrual, dispatch, and collisions. Automatic and manual restarts choose fresh entropy even if the first universe used `--seed`.
 
 ## Display and memory
 
-SDL defaults to borderless desktop fullscreen on display 0, using the selected display's reported dimensions for the world. Windowed/headless defaults are 1200×800. The application requires at least 160×120; `world_init()` permits dimensions up to 65535 per axis for packed positions, subject to allocation limits.
+SDL defaults to one 1200×800 normal window on display 0 with the HUD hidden. `--hud` (`-u`) enables the HUD; `--no-hud` (`-n`) hides it. `--fullscreen` (`-F`) fills the display selected by `--display N` (`-p N`, default 0). `--fullscreen-all` (`-A`) fills every monitor detected at startup with an independent universe, ignoring `--display`. Fullscreen worlds use each monitor's reported dimensions. The last mode flag (`-W`, `-F`, `-A`) wins; `-W` restores a single normal window on the selected display. The last HUD flag wins. Headless mode runs one 1200×800 universe by default. There is no runtime monitor hotplug handling. The application requires at least 160×120; `world_init()` permits dimensions up to 65535 per axis for packed positions, subject to allocation limits.
 
 One cell maps to one display pixel. The render loop targets 60 FPS and does not gate worker execution. There are no ant labels; an optional HUD shows population, workers, quantum, minimum service, age, seed, collisions, and pause state.
 
 `World` contains only `data[]`: one atomic byte per cell containing the logical index. Occupancy remains a separate core allocation. There are no ink buffers, palette fields, or render callbacks in the core.
 
-The Linux host reads a row-major snapshot into its display buffer and passes a `RenderFrame` to the SDL backend. Reads remain independent observations while workers run, but the completed snapshot is stable for rendering. HUD values are sampled separately into plain metadata. Neither the portable renderer nor SDL accesses `World`, ants, or scheduler state.
+Each graphical universe has a controller thread and its own configured ant worker pool. The controller reads a row-major snapshot into its index buffer and passes a `RenderFrame` to portable RGB conversion. Three RGB buffers carry completed frames and HUD snapshots to main, which owns all SDL calls and presents the newest available frame. Older unread frames may be dropped. Main never scans the tape or converts colors; SDL uploads and presentation still scale with window count. Reads remain independent observations while workers run, but the completed snapshot is stable for rendering. HUD values are sampled separately into plain metadata. Neither the portable renderer nor SDL accesses `World`, ants, or scheduler state.
 
-Portable `render_argb()` maps indices through a caller-provided six-color RGB palette; Linux uses fixed black, white, red, yellow, green, and blue. `render_codes()` maps the same indices to caller-provided byte codes for another display backend. Invalid indices map to logical zero. Conversion functions allocate no storage and depend on no OS, hardware driver, or simulation structures.
+Portable `render_argb()` maps indices through a caller-provided six-color RGB palette; Linux uses the hand-tuned Solarized-inspired palette defined in `src/renderer.c` and listed in [RENDERING.md](RENDERING.md). Logical zero maps to a dark teal background; it does not require pure-black RGB. `render_codes()` maps the same indices to caller-provided byte codes for another display backend. Invalid indices map to logical zero. Conversion functions allocate no storage and depend on no OS, hardware driver, or simulation structures.
 
 Palette drift and historical per-write ink have been removed. A same-color rewrite has no distinct visual state. Resetting the tape is enough to reset the displayed image on its next frame; there is no presentation history to clear. Headless mode allocates neither the graphical snapshot nor RGB conversion buffers. See [RENDERING.md](RENDERING.md) for frame ownership and [MEMORY_AND_PERF.md](MEMORY_AND_PERF.md) for storage costs.
 
 ## Lifecycle and observation
 
-The Linux lifecycle is a software timer, default five minutes. Expiry or `R` stops and joins workers, clears state, reseeds, reinitializes the scheduler, and starts another universe. The process continues until quit. A future hardware-reset lifecycle is not implemented.
+Each universe has its own Linux lifecycle software timer, default five minutes. Expiry or `R` stops and joins workers, clears state, reseeds, reinitializes the scheduler, and starts another universe. The process continues until quit. A future hardware-reset lifecycle is not implemented.
 
 Pause prevents new normal dispatches, but outstanding leases can finish. Lifecycle time, capture, and rendering continue, and elapsed-time token accrual can refill buckets on resume. Runtime quantum changes are not retained across restarts; configured startup values are reapplied.
 
-`Q` stops workers, takes a final capture, writes the retained ring, and exits. `ESC`/window close exits without writing a dump. Headless input supports `Q`/`q` followed by Enter.
+`Q` stops the focused universe's workers, takes a final capture, writes its retained ring, and closes its window. `ESC`/window close closes only that universe without writing a dump. Other keys also affect only the focused window. The process exits when the last window closes; an SDL application-wide quit stops all universes. SDL shuts down once, after all windows are destroyed. Headless input supports `Q`/`q` followed by Enter.
 
-Captures default to 127 pages at one-second intervals. Valid capacities are 1, 3, 7, 15, 31, 63, 127, 255, 511, and 1023; indexing uses modulo capacity. Each raw page stores only the logical tape. Metadata includes age, FNV-1a hash, changed cells, global RNG state, population, quantum, minimum service, counters, and ant position/rule/token/credit snapshots.
+Captures default to 127 pages per universe at one-second intervals. Valid capacities are 1, 3, 7, 15, 31, 63, 127, 255, 511, and 1023; indexing uses modulo capacity. Each raw page stores only the logical tape. Metadata includes age, FNV-1a hash, changed cells, global RNG state, population, quantum, minimum service, counters, and ant position/rule/token/credit snapshots.
 
 Live captures are not globally synchronized snapshots. Published ant positions can lag current execution. Captures store logical colors suitable for the fixed-palette renderer, but omit per-ant RNG state and the global token-rate divisor, so they cannot fully reconstruct a run. With one retained page, the change count compares the newly overwritten slot with itself and is always zero. A restart discards the previous universe's capture ring.
 

@@ -19,14 +19,15 @@
 #include <unistd.h>
 #include <poll.h>
 
-/* Linux process orchestration. main.c owns lifetime/configuration, while the
- * scheduler and ant engine own simulation policy. Worker threads do only useful
- * turmite execution; this thread handles input, rendering, dumps and restarts. */
+/* Linux orchestration: main owns SDL windows/events/presentation. Each monitor
+ * has an independent universe controller for lifecycle, capture and frame
+ * preparation, plus its own ant workers. SDL is never called by those threads. */
 
 #define DEFAULT_WIDTH 1200
 #define DEFAULT_HEIGHT 800
 #define CELL_SIZE 1
-#define DEFAULT_DISPLAY 0
+#define DISPLAY_FRAME_SLOTS 3
+#define CONTROL_QUEUE_SIZE 64
 #define DEFAULT_WORKERS 2
 #define DEFAULT_ANTS 8
 #define DEFAULT_QUANTUM 32
@@ -55,15 +56,29 @@ static uint64_t mono_microseconds(void)
     return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
 }
 
-/* Universe groups one complete run plus the process-level configuration reused
- * across five-minute restarts. The worker array is recreated only at process
- * initialization; workers themselves are started/stopped for each run. */
+/* One independent universe per selected display. Configuration is immutable
+ * after startup. The controller owns simulation/control state; main owns SDL.
+ * view_lock protects only O(1) command/frame handoffs, never world scans. */
 typedef struct {
     World world;
     AntColony colony;
     Scheduler scheduler;
     Renderer renderer;
     uint8_t *display_cells;
+    uint32_t *frame_pixels[DISPLAY_FRAME_SLOTS];
+    RendererHud frame_hud[DISPLAY_FRAME_SLOTS];
+    pthread_mutex_t view_lock;
+    bool view_lock_initialized;
+    bool scheduler_initialized;
+    int ready_frame;
+    int displayed_frame;
+    SDL_Keycode commands[CONTROL_QUEUE_SIZE];
+    size_t command_read;
+    size_t command_count;
+    pthread_t controller;
+    bool controller_started;
+    _Atomic bool done;
+    bool failed;
     DumpCapture dump;
     Lfsr32 rng;
     uint32_t seed;
@@ -135,81 +150,65 @@ static void universe_seed(Universe *u)
     u->started_at = now;
 }
 
-/* Allocate the major subsystems in dependency order. The world comes first,
- * then ant occupancy/scheduler state, debug capture, and finally the renderer. */
+/* Called on main only, after all controller/ant threads have been joined. */
+static void universe_destroy(Universe *u)
+{
+    free(u->threads);
+    u->threads = NULL;
+    free(u->display_cells);
+    u->display_cells = NULL;
+    for (size_t i = 0; i < DISPLAY_FRAME_SLOTS; ++i) {
+        free(u->frame_pixels[i]);
+        u->frame_pixels[i] = NULL;
+    }
+    dump_capture_destroy(&u->dump);
+    if (!u->headless) renderer_destroy(&u->renderer);
+    if (u->scheduler_initialized) scheduler_destroy(&u->scheduler);
+    u->scheduler_initialized = false;
+    ant_colony_destroy(&u->colony);
+    world_destroy(&u->world);
+    if (u->view_lock_initialized) pthread_mutex_destroy(&u->view_lock);
+    u->view_lock_initialized = false;
+}
+
+/* A zero-initialized Universe is required. All windows are initialized on main
+ * before any controller starts, so partial startup can unwind synchronously. */
 static int universe_init(Universe *u, uint32_t seed)
 {
     u->seed = seed;
     u->cell_size = CELL_SIZE;
-
-    if (world_init(&u->world, u->width / u->cell_size, u->height / u->cell_size) != 0) {
-        fprintf(stderr, "world allocation failed\n");
-        return -1;
-    }
-    if (ant_colony_init(&u->colony, &u->world) != 0) {
-        fprintf(stderr, "occupancy allocation failed\n");
-        world_destroy(&u->world);
-        return -1;
-    }
-
+    u->ready_frame = u->displayed_frame = -1;
+    if (pthread_mutex_init(&u->view_lock, NULL) != 0) goto fail;
+    u->view_lock_initialized = true;
+    if (world_init(&u->world, u->width, u->height) != 0) goto fail;
+    if (ant_colony_init(&u->colony, &u->world) != 0) goto fail;
     universe_seed(u);
-
-    if (scheduler_init(&u->scheduler, &u->colony, SCHED_WFQ, u->quantum) != 0) {
-        fprintf(stderr, "scheduler initialization failed\n");
-        ant_colony_destroy(&u->colony);
-        world_destroy(&u->world);
-        return -1;
-    }
+    if (scheduler_init(&u->scheduler, &u->colony, SCHED_WFQ, u->quantum) != 0) goto fail;
+    u->scheduler_initialized = true;
     scheduler_set_min_service(&u->scheduler, u->min_service);
     scheduler_set_token_rate_divisor(&u->scheduler, u->token_rate_divisor);
-
     if (dump_capture_init(&u->dump, &u->world, u->seed, u->dump_pages,
-                          u->dump_interval, u->started_at) != 0) {
-        fprintf(stderr, "debug dump initialization failed\n");
-        scheduler_destroy(&u->scheduler);
-        ant_colony_destroy(&u->colony);
-        world_destroy(&u->world);
-        return -1;
-    }
-
-    u->hud_visible = true;
+                          u->dump_interval, u->started_at) != 0) goto fail;
     if (!u->headless) {
         if (renderer_init(&u->renderer, u->width, u->height, u->cell_size,
-                          u->hud_visible, u->display_index, u->fullscreen) != 0) {
-            fprintf(stderr, "renderer initialization failed\n");
-            dump_capture_destroy(&u->dump);
-            scheduler_destroy(&u->scheduler);
-            ant_colony_destroy(&u->colony);
-            world_destroy(&u->world);
-            return -1;
+                          u->hud_visible, u->display_index, u->fullscreen) != 0) goto fail;
+        u->display_cells = malloc(u->world.cells);
+        if (!u->display_cells) goto fail;
+        for (size_t i = 0; i < DISPLAY_FRAME_SLOTS; ++i) {
+            u->frame_pixels[i] = malloc(u->world.cells * sizeof(uint32_t));
+            if (!u->frame_pixels[i]) goto fail;
         }
+        char title[80];
+        snprintf(title, sizeof(title), "Turmite Universe — display %d", u->display_index);
+        SDL_SetWindowTitle(u->renderer.window, title);
     }
-
-    if (!u->headless) u->display_cells = malloc(u->world.cells);
     u->threads = calloc(u->workers, sizeof(*u->threads));
-    if (!u->threads || (!u->headless && !u->display_cells)) {
-        free(u->display_cells);
-        free(u->threads);
-        if (!u->headless) renderer_destroy(&u->renderer);
-        dump_capture_destroy(&u->dump);
-        scheduler_destroy(&u->scheduler);
-        ant_colony_destroy(&u->colony);
-        world_destroy(&u->world);
-        return -1;
-    }
-
+    if (!u->threads) goto fail;
     return 0;
-}
-
-static void universe_destroy(Universe *u)
-{
-    free(u->threads);
-    free(u->display_cells);
-    dump_capture_destroy(&u->dump);
-    if (!u->headless) renderer_destroy(&u->renderer);
-    scheduler_destroy(&u->scheduler);
-    ant_colony_destroy(&u->colony);
-    world_destroy(&u->world);
+fail:
+    fprintf(stderr, "universe initialization failed (display %d)\n", u->display_index);
+    universe_destroy(u);
+    return -1;
 }
 
 /* Workers are independent consumers of scheduler leases. Partial startup
@@ -221,6 +220,7 @@ static int universe_start_workers(Universe *u, WorkerArg *args)
         args[i].worker_id = i;
         if (pthread_create(&u->threads[i], NULL, worker_main, &args[i]) != 0) {
             fprintf(stderr, "pthread_create failed for worker %zu\n", i);
+            u->failed = true;
             atomic_store_explicit(&u->quit, true, memory_order_release);
             scheduler_stop(&u->scheduler);
             for (size_t j = 0; j < i; ++j) pthread_join(u->threads[j], NULL);
@@ -277,16 +277,19 @@ static void usage(const char *prog)
     printf("  --quantum N            maximum instructions per dispatch (1..4096)\n");
     printf("  --min-service N        minimum normal dispatch batch (default 16)\n");
     printf("  --token-rate-divisor N divide all ant token generation rates (default 1)\n");
-    printf("  --workers N            Linux worker pthreads (default 2)\n");
-    printf("  --display N            fullscreen monitor index (default 0)\n");
-    printf("  --windowed             use a normal window instead of fullscreen\n");
+    printf("  --workers N            ant threads PER universe (default 2)\n");
+    printf("  -p, --display N        select monitor N for single-window modes (default 0)\n");
+    printf("  -W, --windowed         one normal window on selected monitor (default)\n");
+    printf("  -F, --fullscreen       fullscreen on selected monitor\n");
+    printf("  -A, --fullscreen-all   fullscreen on every detected monitor\n");
     printf("  --width N              windowed/headless universe width (default 1200)\n");
     printf("  --height N             windowed/headless universe height (default 800)\n");
     printf("  --minutes N            universe lifetime (default 5)\n");
     printf("  --dump-pages N         retained debug pages: 1,3,7,...,1023 (default 127)\n");
     printf("  --dump-interval N      seconds between retained pages (default 1)\n");
     printf("  --dump-dir PATH        parent directory for debug dumps (default ./turmite-dumps)\n");
-    printf("  --no-hud               hide developer HUD\n");
+    printf("  -u, --hud              show developer HUD (hidden by default)\n");
+    printf("  -n, --no-hud           hide developer HUD\n");
     printf("  --headless             run without SDL; type Q then Enter to debug-quit\n");
     printf("  --help                 show this help\n");
 }
@@ -330,7 +333,6 @@ static void handle_key(Universe *u, SDL_Keycode key)
 
     if (key == SDLK_h) {
         u->hud_visible = !u->hud_visible;
-        u->renderer.hud_visible = u->hud_visible;
         return;
     }
 
@@ -393,19 +395,50 @@ static void headless_poll_input(Universe *u)
     }
 }
 
-/* Capture on the host side: rendering never reaches into live ant/scheduler
- * objects. The cell reads are independent observations, not a frozen world.
- * The SDL backend consumes this stable snapshot synchronously. */
+/* Main enqueues keys; the universe controller applies them in order. */
+static bool universe_enqueue(Universe *u, SDL_Keycode key)
+{
+    pthread_mutex_lock(&u->view_lock);
+    const bool room = u->command_count < CONTROL_QUEUE_SIZE;
+    if (room) {
+        u->commands[(u->command_read + u->command_count) % CONTROL_QUEUE_SIZE] = key;
+        ++u->command_count;
+    }
+    pthread_mutex_unlock(&u->view_lock);
+    return room;
+}
+
+static void universe_apply_commands(Universe *u)
+{
+    for (;;) {
+        pthread_mutex_lock(&u->view_lock);
+        if (!u->command_count) {
+            pthread_mutex_unlock(&u->view_lock);
+            return;
+        }
+        SDL_Keycode key = u->commands[u->command_read];
+        u->command_read = (u->command_read + 1) % CONTROL_QUEUE_SIZE;
+        --u->command_count;
+        pthread_mutex_unlock(&u->view_lock);
+        handle_key(u, key);
+    }
+}
+
+/* Single producer: controller chooses the slot neither ready nor being
+ * presented. Triple buffering lets it replace an unread frame without waiting
+ * for a slow upload. It never touches a slot held by main's SDL presentation. */
 static void universe_render(Universe *u, double age, bool paused)
 {
+    pthread_mutex_lock(&u->view_lock);
+    int slot = 0;
+    while (slot == u->ready_frame || slot == u->displayed_frame) ++slot;
+    pthread_mutex_unlock(&u->view_lock);
+
     for (size_t i = 0; i < u->world.cells; ++i)
         u->display_cells[i] = world_load(&u->world, i);
-    const RenderFrame frame = {
-        .width = (size_t)u->world.width,
-        .height = (size_t)u->world.height,
-        .colors = u->display_cells
-    };
-    const RendererHud hud = {
+    const RenderFrame frame = { (size_t)u->world.width, (size_t)u->world.height, u->display_cells };
+    (void)render_argb(&frame, RENDER_BASE_PALETTE, u->frame_pixels[slot], u->world.cells);
+    u->frame_hud[slot] = (RendererHud){
         .population = scheduler_active_population(&u->scheduler),
         .workers = u->workers,
         .quantum = scheduler_get_quantum(&u->scheduler),
@@ -415,12 +448,30 @@ static void universe_render(Universe *u, double age, bool paused)
         .collisions = atomic_load_explicit(&u->colony.collisions, memory_order_relaxed),
         .paused = paused
     };
-    renderer_render(&u->renderer, &frame, &hud);
+    /* HUD visibility travels with the frame; renderer fields stay main-owned. */
+    u->frame_hud[slot].visible = u->hud_visible;
+    pthread_mutex_lock(&u->view_lock);
+    u->ready_frame = slot;
+    pthread_mutex_unlock(&u->view_lock);
 }
 
-/* Main control/render loop. Workers evolve the universe concurrently while
- * this thread handles input, periodic dump capture, rendering and watchdog-like
- * lifetime restart behavior. Rendering is therefore only an observer. */
+/* Main consumes a prepared buffer. No world scan or conversion on this thread. */
+static void universe_present(Universe *u)
+{
+    pthread_mutex_lock(&u->view_lock);
+    int slot = u->ready_frame;
+    if (slot >= 0) {
+        u->displayed_frame = slot;
+        u->ready_frame = -1;
+    }
+    pthread_mutex_unlock(&u->view_lock);
+    if (slot < 0) return;
+    u->renderer.hud_visible = u->frame_hud[slot].visible;
+    renderer_present(&u->renderer, u->frame_pixels[slot], u->world.cells, &u->frame_hud[slot]);
+}
+
+/* Per-universe control loop. CPU frame preparation and dump capture run here,
+ * never on SDL's main thread and never on an ant execution worker. */
 static bool run_universe(Universe *u)
 {
     WorkerArg args[8];
@@ -436,15 +487,9 @@ static bool run_universe(Universe *u)
     const double frame_period = 1.0 / 60.0;
 
     while (!atomic_load_explicit(&u->quit, memory_order_acquire) && !u->restart) {
-        if (!u->headless) {
-            SDL_Event ev;
-            while (SDL_PollEvent(&ev)) {
-                if (ev.type == SDL_QUIT) atomic_store_explicit(&u->quit, true, memory_order_release);
-                else if (ev.type == SDL_KEYDOWN && !ev.key.repeat) handle_key(u, ev.key.keysym.sym);
-            }
-        } else {
-            headless_poll_input(u);
-        }
+        universe_apply_commands(u);
+        if (u->headless) headless_poll_input(u);
+        if (atomic_load_explicit(&u->quit, memory_order_acquire) || u->restart) break;
 
         double now = mono_seconds();
         double age = now - u->started_at;
@@ -461,8 +506,9 @@ static bool run_universe(Universe *u)
             next_frame += frame_period;
             double sleep_for = next_frame - mono_seconds();
             if (sleep_for > 0.0) {
-                Uint32 ms = (Uint32)(sleep_for * 1000.0);
-                if (ms > 0) SDL_Delay(ms);
+                struct timespec ts = { (time_t)sleep_for,
+                    (long)((sleep_for - (time_t)sleep_for) * 1e9) };
+                nanosleep(&ts, NULL);
             } else {
                 next_frame = mono_seconds();
             }
@@ -485,22 +531,63 @@ static bool run_universe(Universe *u)
 
     if (timed_out) u->restart = true;
 
-    /* Hold the final frame briefly so a restart/quit does not visually tear the
-     * last state away immediately. */
-    if (!u->headless && (u->restart || u->quit || timed_out)) {
-        const Uint32 final_ms = 400;
-        Uint32 start = SDL_GetTicks();
-        while (SDL_GetTicks() - start < final_ms) {
-            SDL_Event ev;
-            while (SDL_PollEvent(&ev)) {
-                if (ev.type == SDL_QUIT) atomic_store_explicit(&u->quit, true, memory_order_release);
-            }
-            universe_render(u, mono_seconds() - u->started_at, true);
-            SDL_Delay(16);
-        }
+    if (!u->headless) {
+        universe_render(u, mono_seconds() - u->started_at, true);
+        /* Give main a chance to show the final frame without stalling peers. */
+        struct timespec ts = { .tv_nsec = 400000000L };
+        nanosleep(&ts, NULL);
     }
 
     return !atomic_load_explicit(&u->quit, memory_order_acquire) && (u->restart || timed_out);
+}
+
+static void *universe_control(void *arg)
+{
+    Universe *u = arg;
+    while (run_universe(u)) {
+        choose_new_seed(u);
+        u->restart = false;
+        u->debug_dump = false;
+        u->paused = false;
+        /* Main may request close at any time: never clear its quit flag. */
+        if (atomic_load_explicit(&u->quit, memory_order_acquire)) break;
+        universe_seed(u);
+        scheduler_destroy(&u->scheduler);
+        u->scheduler_initialized = false;
+        if (scheduler_init(&u->scheduler, &u->colony, SCHED_WFQ, u->quantum) != 0) {
+            u->failed = true;
+            break;
+        }
+        u->scheduler_initialized = true;
+        scheduler_set_min_service(&u->scheduler, u->min_service);
+        scheduler_set_token_rate_divisor(&u->scheduler, u->token_rate_divisor);
+    }
+    atomic_store_explicit(&u->done, true, memory_order_release);
+    return NULL;
+}
+
+/* A key/close event is routed only to the universe owning that SDL window. */
+static void route_event(Universe *universes, size_t count, const SDL_Event *event)
+{
+    if (event->type == SDL_QUIT) {
+        for (size_t i = 0; i < count; ++i)
+            atomic_store_explicit(&universes[i].quit, true, memory_order_release);
+        return;
+    }
+    Uint32 id = 0;
+    if (event->type == SDL_KEYDOWN && !event->key.repeat) id = event->key.windowID;
+    else if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_CLOSE)
+        id = event->window.windowID;
+    if (!id) return;
+    for (size_t i = 0; i < count; ++i) {
+        Universe *u = &universes[i];
+        if (!u->renderer.window || SDL_GetWindowID(u->renderer.window) != id) continue;
+        if (event->type == SDL_WINDOWEVENT || event->key.keysym.sym == SDLK_ESCAPE)
+            atomic_store_explicit(&u->quit, true, memory_order_release);
+        else if (!universe_enqueue(u, event->key.keysym.sym))
+            fprintf(stderr, "display %d control queue full; key ignored\n", u->display_index);
+        return;
+    }
 }
 
 int main(int argc, char **argv)
@@ -514,13 +601,14 @@ int main(int argc, char **argv)
     size_t workers = DEFAULT_WORKERS;
     size_t width = DEFAULT_WIDTH;
     size_t height = DEFAULT_HEIGHT;
-    int display_index = DEFAULT_DISPLAY;
-    bool fullscreen = true;
+    int display_index = 0;
+    bool all_displays = false;
+    bool fullscreen = false;
     double minutes = DEFAULT_MINUTES;
     size_t dump_pages = DEFAULT_DUMP_PAGES;
     double dump_interval = DEFAULT_DUMP_INTERVAL;
     const char *dump_root = dump_default_output_root();
-    bool hud = true;
+    bool hud = false;
     uint32_t explicit_seed = 0;
     bool has_seed = false;
     bool headless = false;
@@ -534,6 +622,9 @@ int main(int argc, char **argv)
         {"workers", required_argument, NULL, 'w'},
         {"display", required_argument, NULL, 'p'},
         {"windowed", no_argument, NULL, 'W'},
+        {"fullscreen", no_argument, NULL, 'F'},
+        {"fullscreen-all", no_argument, NULL, 'A'},
+        {"hud", no_argument, NULL, 'u'},
         {"width", required_argument, NULL, 'x'},
         {"height", required_argument, NULL, 'y'},
         {"minutes", required_argument, NULL, 'm'},
@@ -547,7 +638,7 @@ int main(int argc, char **argv)
     };
 
     for (;;) {
-        int c = getopt_long(argc, argv, "s:a:q:b:v:w:p:Wx:y:m:d:i:D:nHh", opts, NULL);
+        int c = getopt_long(argc, argv, "s:a:q:b:v:w:p:WFAux:y:m:d:i:D:nHh", opts, NULL);
         if (c == -1) break;
         switch (c) {
             case 's': if (!parse_seed(optarg, &explicit_seed)) { fprintf(stderr, "bad --seed\n"); return 2; } has_seed = true; break;
@@ -557,7 +648,10 @@ int main(int argc, char **argv)
             case 'v': if (!parse_uint(optarg, &token_rate_divisor) || token_rate_divisor > UINT32_MAX) { fprintf(stderr, "bad --token-rate-divisor\n"); return 2; } break;
             case 'w': if (!parse_uint(optarg, &workers) || workers > 8) { fprintf(stderr, "--workers must be 1..8\n"); return 2; } break;
             case 'p': if (!parse_display(optarg, &display_index)) { fprintf(stderr, "bad --display\n"); return 2; } break;
-            case 'W': fullscreen = false; break;
+            case 'W': fullscreen = false; all_displays = false; break;
+            case 'F': fullscreen = true; all_displays = false; break;
+            case 'A': fullscreen = true; all_displays = true; break;
+            case 'u': hud = true; break;
             case 'x': if (!parse_uint(optarg, &width)) { fprintf(stderr, "bad --width\n"); return 2; } break;
             case 'y': if (!parse_uint(optarg, &height)) { fprintf(stderr, "bad --height\n"); return 2; } break;
             case 'm': minutes = strtod(optarg, NULL); if (minutes <= 0.0) { fprintf(stderr, "bad --minutes\n"); return 2; } break;
@@ -571,68 +665,99 @@ int main(int argc, char **argv)
         }
     }
 
-    /* In fullscreen mode the monitor becomes the universe: one logical tape
-     * cell maps to one physical display pixel. Windowed/headless modes keep the
-     * explicit width/height controls for development and benchmarking. */
-    if (fullscreen && !headless) {
-        int display_width = 0;
-        int display_height = 0;
-        if (renderer_display_size(display_index, &display_width, &display_height) != 0) return 2;
-        width = (size_t)display_width;
-        height = (size_t)display_height;
-    }
-
-    if (width < 160 || height < 120 || width > INT_MAX || height > INT_MAX) {
-        fprintf(stderr, "universe dimensions are invalid\n");
+    const int displays = headless ? 1 : renderer_display_count();
+    if (displays <= 0 || (!headless && !all_displays && display_index >= displays)) {
+        fprintf(stderr, "no usable displays or invalid --display index\n");
+        if (!headless) renderer_shutdown();
         return 2;
     }
-
-    /* Command-line values are copied into Universe once; restarts reuse this
-     * configuration while selecting a fresh random seed. */
-    Universe u;
-    memset(&u, 0, sizeof(u));
-    u.width = (int)width;
-    u.height = (int)height;
-    u.display_index = display_index;
-    u.fullscreen = fullscreen;
-    u.workers = workers;
-    u.initial_ants = ants;
-    u.quantum = quantum;
-    u.min_service = min_service;
-    u.token_rate_divisor = (uint32_t)token_rate_divisor;
-    u.lifetime_minutes = minutes;
-    u.dump_pages = dump_pages;
-    u.dump_interval = dump_interval;
-    u.dump_root = dump_root;
-    u.headless = headless;
-    u.stdin_eof = false;
-    atomic_init(&u.quit, false);
-
-    if (universe_init(&u, has_seed ? explicit_seed : rng_entropy_seed()) != 0) return 1;
-    u.renderer.hud_visible = hud;
-    u.hud_visible = hud;
-
-    /* The outer lifecycle loop emulates the eventual appliance watchdog: each
-     * timeout/restart reuses allocated subsystems but reseeds and rebuilds the
-     * population/scheduler state for a new universe. */
-    bool restart = true;
-    while (restart) {
-        restart = run_universe(&u);
-        if (!u.quit && restart) {
-            choose_new_seed(&u);
-            u.restart = false;
-            u.debug_dump = false;
-            u.paused = false;
-            atomic_store_explicit(&u.quit, false, memory_order_release);
-            universe_seed(&u);
-            scheduler_destroy(&u.scheduler);
-            if (scheduler_init(&u.scheduler, &u.colony, SCHED_WFQ, u.quantum) != 0) break;
-            scheduler_set_min_service(&u.scheduler, u.min_service);
-            scheduler_set_token_rate_divisor(&u.scheduler, u.token_rate_divisor);
-        }
-        if (u.quit) break;
+    const size_t count = headless || !all_displays ? 1u : (size_t)displays;
+    Universe *universes = calloc(count, sizeof(*universes));
+    if (!universes) {
+        if (!headless) renderer_shutdown();
+        return 1;
     }
-
-    universe_destroy(&u);
-    return 0;
+    size_t initialized = 0;
+    int result = 0;
+    const uint32_t base_seed = has_seed ? explicit_seed : rng_entropy_seed();
+    for (size_t i = 0; i < count; ++i) {
+        Universe *u = &universes[i];
+        u->display_index = all_displays && !headless ? (int)i : display_index;
+        size_t world_width = width, world_height = height;
+        if (fullscreen && !headless) {
+            int dw, dh;
+            if (renderer_display_size(u->display_index, &dw, &dh) != 0) { result = 2; break; }
+            world_width = (size_t)dw;
+            world_height = (size_t)dh;
+        }
+        if (world_width < 160 || world_height < 120 || world_width > 65535 || world_height > 65535) {
+            fprintf(stderr, "universe dimensions are invalid\n");
+            result = 2;
+            break;
+        }
+        u->width = (int)world_width;
+        u->height = (int)world_height;
+        u->fullscreen = fullscreen;
+        u->workers = workers;
+        u->initial_ants = ants;
+        u->quantum = quantum;
+        u->min_service = min_service;
+        u->token_rate_divisor = (uint32_t)token_rate_divisor;
+        u->lifetime_minutes = minutes;
+        u->dump_pages = dump_pages;
+        u->dump_interval = dump_interval;
+        u->dump_root = dump_root;
+        u->headless = headless;
+        u->hud_visible = hud;
+        atomic_init(&u->quit, false);
+        atomic_init(&u->done, false);
+        /* Deterministic distinct startup seeds; a single window keeps --seed
+         * exactly. Automatic restarts still use fresh host entropy. */
+        uint32_t seed = base_seed ^ (UINT32_C(0x9e3779b9) * (uint32_t)i);
+        if (!seed) seed = 1;
+        if (universe_init(u, seed) != 0) { result = 1; break; }
+        ++initialized;
+    }
+    if (!result && headless) {
+        (void)universe_control(&universes[0]);
+        result = universes[0].failed ? 1 : 0;
+    } else if (!result) {
+        for (size_t i = 0; i < count; ++i) {
+            if (pthread_create(&universes[i].controller, NULL, universe_control, &universes[i]) != 0) {
+                fprintf(stderr, "controller thread creation failed\n");
+                result = 1;
+                break;
+            }
+            universes[i].controller_started = true;
+        }
+        size_t live = result ? 0 : count;
+        while (live) {
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) route_event(universes, count, &event);
+            live = 0;
+            for (size_t i = 0; i < count; ++i) {
+                Universe *u = &universes[i];
+                if (!u->controller_started) continue;
+                universe_present(u);
+                if (atomic_load_explicit(&u->done, memory_order_acquire)) {
+                    pthread_join(u->controller, NULL);
+                    u->controller_started = false;
+                    if (u->failed) result = 1;
+                    /* Release this universe now; peers keep running. */
+                    universe_destroy(u);
+                } else ++live;
+            }
+            if (live) SDL_Delay(1);
+        }
+    }
+    /* Also covers partial thread creation: request stop, join, then free. */
+    for (size_t i = 0; i < initialized; ++i)
+        atomic_store_explicit(&universes[i].quit, true, memory_order_release);
+    for (size_t i = 0; i < initialized; ++i) {
+        if (universes[i].controller_started) pthread_join(universes[i].controller, NULL);
+        universe_destroy(&universes[i]);
+    }
+    free(universes);
+    if (!headless) renderer_shutdown();
+    return result;
 }

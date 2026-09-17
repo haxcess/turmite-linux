@@ -1,3 +1,4 @@
 turmite
 src/*.o
 src/*.d
+turmite-dumps/

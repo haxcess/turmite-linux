@@ -15,12 +15,16 @@ int main(void)
         snapshot[i] = world_load(&world, i);
     }
     const RenderFrame frame = {3, 2, snapshot};
+    /* Conversion uses a fixed fixture, independent of the user's preview palette. */
+    const uint32_t palette[TURMITE_COLORS] = {
+        0x010203u, 0x102030u, 0x334455u, 0x667788u, 0x99aabbu, 0xccddeeu
+    };
     const uint32_t expected[] = {
-        0xff000000u, 0xfff2f2f2u, 0xffe84a5fu,
-        0xfff5d547u, 0xff58d68du, 0xff4ea5d9u
+        0xff010203u, 0xff102030u, 0xff334455u,
+        0xff667788u, 0xff99aabbu, 0xffccddeeu
     };
     uint32_t rgb[6];
-    assert(render_argb(&frame, RENDER_BASE_PALETTE, rgb, 6));
+    assert(render_argb(&frame, palette, rgb, 6));
     assert(memcmp(rgb, expected, sizeof(rgb)) == 0);
 
     /* A backend can use a completely different panel encoding without RGB.
@@ -32,12 +36,12 @@ int main(void)
 
     /* Captured storage is stable while the simulation moves on. */
     world_clear(&world);
-    assert(render_argb(&frame, RENDER_BASE_PALETTE, rgb, 6));
+    assert(render_argb(&frame, palette, rgb, 6));
     assert(memcmp(rgb, expected, sizeof(rgb)) == 0);
     for (size_t i = 0; i < world.cells; ++i)
         snapshot[i] = world_load(&world, i);
-    assert(render_argb(&frame, RENDER_BASE_PALETTE, rgb, 6));
-    for (size_t i = 0; i < 6; ++i) assert(rgb[i] == 0xff000000u);
+    assert(render_argb(&frame, palette, rgb, 6));
+    for (size_t i = 0; i < 6; ++i) assert(rgb[i] == expected[0]);
 
     /* A custom palette belongs to rendering; the world stays unchanged. */
     const uint32_t custom[6] = {0x123456u, 0, 0, 0, 0, 0};

@@ -2,15 +2,26 @@
 
 Use explicit dimensions, seed, worker count, and batching settings when comparing runs. Identical seeds do not guarantee identical worlds: timing affects scheduling, tokens, and collisions, including with one worker.
 
+## Multiple monitors
+
+```sh
+./turmite --dump-pages 7                  # one normal window on display 0, HUD hidden
+./turmite --fullscreen-all --dump-pages 7 # independent fullscreen universes on all monitors
+./turmite --fullscreen --display 1 --hud --dump-pages 7 # fullscreen on monitor 1 with HUD
+make multi-window-test
+```
+
+Each universe has its own controller and `--workers` ant threads. Focus a window and test pause, HUD toggle, restart, and close while watching the others continue. Discovery happens at startup. The automated tests use dummy video and simulated monitor enumeration; verify placement and fullscreen behavior on a real multi-monitor desktop. Controlled comparisons below select one display explicitly.
+
 ## Quantum and batching
 
 These windowed runs keep dimensions and normal batching fixed while varying the maximum grant:
 
 ```sh
-./turmite --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 1
-./turmite --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 8
-./turmite --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 64
-./turmite --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 256
+./turmite --display 0 --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 1
+./turmite --display 0 --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 8
+./turmite --display 0 --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 64
+./turmite --display 0 --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 256
 ```
 
 The effective minimum is `min(min_service, quantum)`. Repeat with `--min-service 1` to isolate unbatched behavior. Watch collisions and visible structure; raw instruction throughput alone does not describe the artwork.
@@ -18,7 +29,7 @@ The effective minimum is `min(min_service, quantum)`. Repeat with `--min-service
 For slow, bursty motion:
 
 ```sh
-./turmite --windowed --width 600 --height 400 --dump-pages 7 --token-rate-divisor 100 --quantum 64 --min-service 32
+./turmite --display 0 --windowed --width 600 --height 400 --dump-pages 7 --token-rate-divisor 100 --quantum 64 --min-service 32
 ```
 
 The divisor changes accrual; minimum service changes burst release. Initial, cloned, and mutated ants still receive full buckets, so slow accrual does not remove their initial burst.

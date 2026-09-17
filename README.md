@@ -6,14 +6,14 @@ Repository: [haxcess/turmite-linux](https://github.com/haxcess/turmite-linux). C
 
 ## Current behavior
 
-- 2, 4, 8, 16, or 32 initial ants; two POSIX worker threads by default.
+- 2, 4, 8, 16, or 32 initial ants; two POSIX ant worker threads per universe by default.
 - Eighteen built-in rules, with up to four internal states and six logical colors.
 - A wrapping 2-D world with one relaxed atomic byte per logical cell. A complete turmite instruction is deliberately not a transaction.
 - A separate atomic byte per cell records occupancy for O(1) collision lookup. Token balance determines collision health; lower ant ID wins ties.
 - Q16 token buckets, weighted-fair credit, configurable quantum, minimum-service batching, and a universe-wide token-rate divisor.
 - Population doubling clones eligible ants with full token buckets; halving requests gradual token-drain retirement.
 - SDL2 presentation at a target 60 FPS, independent of worker execution, with one world cell per display pixel.
-- Platform-independent six-color frame conversion with a fixed Linux preview palette. The core stores only logical colors; SDL owns its RGB output buffers. There is no palette drift or ink history.
+- Platform-independent six-color frame conversion with a fixed, hand-tuned Solarized-inspired Linux preview palette. The core stores only logical colors; the host owns its prepared RGB frames. There is no palette drift or ink history.
 - A five-minute software lifecycle stops workers, clears the universe, and starts again with a fresh seed. It is not a hardware watchdog.
 
 See [SPEC.md](SPEC.md) for exact behavior and known limitations.
@@ -28,23 +28,25 @@ make
 ./turmite
 ```
 
-The default borderless fullscreen window uses SDL display 0. Its reported desktop dimensions determine the world dimensions. Select another monitor with `--display 1` or `--display 2`.
+By default, Linux opens one normal window on display 0 with the HUD hidden. Use `-u`/`--hud` to show it, `-F`/`--fullscreen` for fullscreen on the selected display, or `-A`/`--fullscreen-all` for independent fullscreen universes on every monitor detected at startup. `-p N`/`--display N` selects the monitor for single-window modes (default 0). Monitor hotplug is not handled during a run.
 
-Windowed and headless modes default to a 1200×800 world and accept explicit dimensions:
+Windowed and headless modes run one universe, default to 1200×800, and accept explicit dimensions. Fullscreen uses each selected monitor's reported dimensions. The last mode flag (`-W`, `-F`, or `-A`) wins; `--display` does not restrict `--fullscreen-all`. The last HUD flag (`-u` or `-n`) wins:
 
 ```sh
-./turmite --windowed --width 1200 --height 800
+./turmite --hud --width 1200 --height 800
+./turmite --fullscreen
+./turmite --fullscreen-all
 ./turmite --display 1 --ants 16 --quantum 64 --seed 0x12345678
 ./turmite --windowed --token-rate-divisor 100 --min-service 32
 ./turmite --headless --width 300 --height 200 --dump-pages 7
 ./turmite --help
 ```
 
-The application defaults to 8 ants, 2 workers, quantum 32, minimum service 16, and token-rate divisor 1. It accepts 1..8 workers and quantum/minimum-service values of 1..4096. A minimum service of 1 reproduces unbatched scheduling. `--minutes` changes the restart interval; it does not make the process exit after that duration.
+Each universe defaults to 8 ants, 2 ant workers, quantum 32, minimum service 16, and token-rate divisor 1. It accepts 1..8 workers and quantum/minimum-service values of 1..4096. A minimum service of 1 reproduces unbatched scheduling. `--minutes` changes the restart interval; it does not make the process exit after that duration.
 
 ## Runtime controls
 
-These controls apply to the SDL window:
+These controls apply only to the focused window and its universe:
 
 | Key | Action |
 | --- | --- |
@@ -54,10 +56,10 @@ These controls apply to the SDL window:
 | `+` or `=` | Request doubling, up to 32 ants |
 | `R` | Start a fresh universe with a new seed |
 | `H` | Toggle the developer HUD |
-| `Q` | Stop workers, capture a final page, write a debug dump, and quit |
-| `ESC` | Quit without a dump |
+| `Q` | Stop this universe, capture a final page, write its dump, and close its window |
+| `ESC` | Close this window without a dump |
 
-Use `--no-hud` to start without the HUD. Headless input supports only `Q`/`q` followed by Enter for dump-and-quit. Pause does not freeze the lifecycle timer or capture schedule, and an already leased quantum can finish. Restart restores the original configured quantum and population.
+Closing a window leaves the other universes running; the process exits after the last window closes. An SDL application-wide quit stops all universes. Use `--hud` to start with the HUD; `--no-hud` explicitly restores the default hidden state. Headless input supports only `Q`/`q` followed by Enter for dump-and-quit. Pause does not freeze the lifecycle timer or capture schedule, and an already leased quantum can finish. Restart restores the original configured quantum and population.
 
 ## Concurrency and presentation
 
@@ -67,11 +69,11 @@ Workers keep position, heading, and state local during a quantum and publish the
 
 An explicit seed defines initialization and RNG streams, but timing and thread interleaving can make repeated runs diverge. A dump is observational, not a replay checkpoint.
 
-The host samples the tape into a stable, row-major frame of indices 0..5. Portable rendering maps those indices to a fixed RGB palette for SDL or caller-supplied display codes. The SDL backend receives frame and HUD snapshots without accessing simulation objects. Headless runs allocate no display snapshot or RGB buffers. See [RENDERING.md](RENDERING.md) for the platform boundary.
+Each graphical universe has a controller thread for lifecycle, input commands, capture, and CPU frame preparation, plus its own ant worker pool. The controller samples the tape into a stable, row-major frame of indices 0..5 and uses portable conversion to prepare RGB pixels. Three RGB buffers let it publish the latest complete frame without overwriting one being presented. Main owns SDL events, uploads, HUD drawing, and presentation; it does no world sampling or color conversion. With M monitors and W ant workers per universe, there are `1 + M × (W + 1)` application threads, excluding any SDL/driver threads. SDL presentation work still scales with the number of windows. Headless runs allocate no display snapshot or RGB buffers. See [RENDERING.md](RENDERING.md) for the platform boundary.
 
 ## Debug dumps
 
-Capture runs in graphical and headless modes. The default ring retains 127 logical-world pages sampled once per second, with an initial capture and an additional final capture on debug quit. Accepted capacities are `1,3,7,15,31,63,127,255,511,1023`. Storage uses exactly that many pages and modulo indexing.
+Capture runs in graphical and headless modes. Each universe has its own ring, which by default retains 127 logical-world pages sampled once per second, with an initial capture and an additional final capture on debug quit. Accepted capacities are `1,3,7,15,31,63,127,255,511,1023`. Storage uses exactly that many pages and modulo indexing.
 
 ```sh
 ./turmite --windowed --dump-pages 31 --dump-interval 0.5 --dump-dir ./captures
@@ -94,7 +96,7 @@ python3 tools/analyze_dump.py ./turmite-dumps/tape-SEED-TIMESTAMP --page 0
 
 Replace the example directory with an actual capture path. Reported repeating hashes are clues about sampled tape states, not proof that the whole simulation is cycling.
 
-Memory grows with world resolution: the core currently uses about 2 bytes per cell, plus 1 byte per cell for the graphical snapshot and 4 bytes per cell for the SDL staging buffer, SDL-managed resources, and 1 byte per cell per retained dump page. At 1920×1080, the default dump pages alone require about 263 MB; at 3840×2160, about 1.05 GB. See [MEMORY_AND_PERF.md](MEMORY_AND_PERF.md) for the breakdown.
+Memory grows with world resolution: the core currently uses about 2 bytes per cell, plus 1 byte per cell for the graphical snapshot and 12 bytes per cell for three prepared RGB frames, SDL-managed resources, and 1 byte per cell per retained dump page. Each monitor allocates its own world, buffers, and capture ring. At 1920×1080, the default dump pages alone require about 263 MB; at 3840×2160, about 1.05 GB. See [MEMORY_AND_PERF.md](MEMORY_AND_PERF.md) for the breakdown.
 
 ## Validation and profiling
 
@@ -102,13 +104,14 @@ Memory grows with world resolution: the core currently uses about 2 bytes per ce
 make core-test
 make render-test
 make sdl-test
+make multi-window-test
 make tsan-test
 make struct-report
 make bench
 make perf-stat
 ```
 
-The core test checks population and final occupancy consistency after a short two-worker run. `render-test` checks six-color conversion, a custom panel-code mapping, snapshot isolation, and buffer validation without SDL. `sdl-test` checks actual pixel readback through SDL's dummy video/software renderer. ThreadSanitizer requires a supported compiler/runtime. Core tests and the benchmark do not need SDL; the main application still links SDL even in headless mode. The default application build uses `-O2` without `-g`; benchmark/profile builds include debug information.
+The core test checks population and final occupancy consistency after a short two-worker run. `render-test` checks six-color conversion, a custom panel-code mapping, snapshot isolation, and buffer validation without SDL. `sdl-test` checks actual pixel readback through SDL's dummy video/software renderer. `multi-window-test` checks independent controls, restart, frame ownership, and closing one window while another continues; a second test simulates two detected monitors through the real application entry point. These use SDL dummy video, not physical monitors. ThreadSanitizer requires a supported compiler/runtime. Core tests and the benchmark do not need SDL; the main application still links SDL even in headless mode. The default application and benchmark builds use `-O2 -g`.
 
 For controlled benchmark comparisons, see [EXPERIMENTS.md](EXPERIMENTS.md). Profiling targets require Linux `perf` and permission to use performance counters. The checked-in `perf-*.txt` reports are historical artifacts, not current throughput guarantees.
 
@@ -120,8 +123,8 @@ For controlled benchmark comparisons, see [EXPERIMENTS.md](EXPERIMENTS.md). Prof
 | `src/scheduler.c` | WFQ-like selection, tokens, leases, population controls, pthread synchronization |
 | `src/world.c` | Logical tape and allocation |
 | `src/renderer.c`, `src/renderer.h` | Portable six-color frame and color conversion |
-| `src/main.c` | Linux lifecycle, input, workers, frame/HUD sampling |
-| `src/renderer_sdl.c`, `src/renderer_sdl.h` | SDL transport, RGB buffers, developer HUD |
+| `src/main.c` | Monitor discovery, independent controllers/workers, frame handoff, SDL event routing |
+| `src/renderer_sdl.c`, `src/renderer_sdl.h` | SDL windows, prepared-pixel presentation, developer HUD |
 | `src/dump.c`, `tools/analyze_dump.py` | Logical-world capture and offline inspection |
 | `turmite-ruleTesting.html` | Standalone browser rule playground; not the concurrent C runtime |
 | `stm32/` | Proposed dual-core design and occupancy helper scaffold |

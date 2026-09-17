@@ -13,6 +13,8 @@ This is the current queue. [OPTIMIZATION_NOTES.md](OPTIMIZATION_NOTES.md) preser
 - Benchmark counters for grant size, completed work, empty scans, and idle waits.
 - Rendering separated from the simulation: portable six-color snapshots/conversion, fixed-palette SDL output, no RGB ink writes or storage in the core.
 
+- Opt-in `--fullscreen-all` independent Linux universes per detected monitor, each with its own controller and ant workers; CPU frame preparation is handed to main through three buffers for SDL presentation.
+
 ## Correctness gates before further optimization
 
 1. Check collision-loser execution: the instruction loop currently ignores a failed movement claim and continues the grant without rechecking clobbered status. Establish the intended behavior and cover it with focused tests.
@@ -38,6 +40,6 @@ See [stm32/INTEGRATION.md](stm32/INTEGRATION.md) for the proposed integration se
 1. Rerun unbatched, batched, and saturated benchmarks after removing RGB work from ant instructions. Historical results describe different presentation costs.
 2. Compare one-worker throughput with two-worker contention before changing shared-state traffic.
 3. If scheduler scans or displaced-ant reclamation dominate, evaluate targeted bookkeeping or wakeup changes while retaining token/lease semantics.
-4. Measure tape/occupancy costs in workers and snapshot/conversion costs in rendering separately before optimizing the interpreter.
+4. Measure tape/occupancy costs in workers and snapshot/conversion costs in rendering separately before optimizing the interpreter. For multi-monitor runs, also measure aggregate controller load, SDL upload/presentation time, dropped frames, and memory use against `--display N` single-window runs.
 
 Do not treat smaller host structures or higher saturated throughput as evidence that the firmware port is correct or that the normal visual workload improves.

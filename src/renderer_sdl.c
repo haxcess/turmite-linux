@@ -94,6 +94,17 @@ static int ensure_sdl_video(void)
     return 0;
 }
 
+int renderer_display_count(void)
+{
+    if (ensure_sdl_video() != 0) return -1;
+    return SDL_GetNumVideoDisplays();
+}
+
+void renderer_shutdown(void)
+{
+    SDL_Quit();
+}
+
 int renderer_display_size(int display_index, int *width, int *height)
 {
     if (!width || !height || display_index < 0) return -1;
@@ -141,10 +152,13 @@ int renderer_init(Renderer *renderer, int width, int height, int cell_size,
 
     /* SDL display indices choose the monitor. Desktop fullscreen preserves the
      * monitor's native video mode; windowed mode is centered on the same display. */
-    const int x = fullscreen ? SDL_WINDOWPOS_UNDEFINED_DISPLAY(display_index)
-                             : SDL_WINDOWPOS_CENTERED_DISPLAY(display_index);
-    const int y = fullscreen ? SDL_WINDOWPOS_UNDEFINED_DISPLAY(display_index)
-                             : SDL_WINDOWPOS_CENTERED_DISPLAY(display_index);
+    /* Keep other fullscreen monitor windows visible when focus changes. */
+    SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
+    /* An undefined position can let Wayland choose the fullscreen output
+     * (including through sdl2-compat), ignoring the intended monitor. Centered
+     * placement explicitly selects the display for desktop fullscreen too. */
+    const int x = SDL_WINDOWPOS_CENTERED_DISPLAY(display_index);
+    const int y = SDL_WINDOWPOS_CENTERED_DISPLAY(display_index);
     const Uint32 flags = SDL_WINDOW_SHOWN |
                          (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0u);
 
@@ -163,8 +177,8 @@ int renderer_init(Renderer *renderer, int width, int height, int cell_size,
     }
 
     SDL_SetRenderDrawBlendMode(renderer->renderer, SDL_BLENDMODE_BLEND);
-    renderer->pixels = malloc(renderer->cells * sizeof(*renderer->pixels));
-    if (!renderer->pixels) goto fail;
+    /* The threaded application supplies prepared pixels. The synchronous
+     * convenience path allocates its conversion buffer only when used. */
 
     /* renderer->pixels stores packed 0xAARRGGBB words. ARGB8888 matches that
      * integer layout; using RGBA8888 made the 0xFF alpha byte appear as red. */
@@ -186,7 +200,6 @@ void renderer_destroy(Renderer *renderer)
     SDL_DestroyTexture(renderer->texture);
     SDL_DestroyRenderer(renderer->renderer);
     SDL_DestroyWindow(renderer->window);
-    SDL_Quit();
     memset(renderer, 0, sizeof(*renderer));
 }
 
@@ -196,10 +209,18 @@ void renderer_render(Renderer *renderer, const RenderFrame *frame,
     if (!renderer || !renderer->texture || !hud || !frame ||
         frame->width != (size_t)(renderer->width / renderer->cell_size) ||
         frame->height != (size_t)(renderer->height / renderer->cell_size)) return;
+    if (!renderer->pixels)
+        renderer->pixels = malloc(renderer->cells * sizeof(*renderer->pixels));
     if (!render_argb(frame, RENDER_BASE_PALETTE, renderer->pixels, renderer->cells)) return;
+    renderer_present(renderer, renderer->pixels, renderer->cells, hud);
+}
 
-    SDL_UpdateTexture(renderer->texture, NULL, renderer->pixels,
-                      (int)(frame->width * sizeof(*renderer->pixels)));
+void renderer_present(Renderer *renderer, const uint32_t *pixels, size_t cells,
+                      const RendererHud *hud)
+{
+    if (!renderer || !renderer->texture || !pixels || !hud || cells != renderer->cells) return;
+    SDL_UpdateTexture(renderer->texture, NULL, pixels,
+                      (renderer->width / renderer->cell_size) * (int)sizeof(*pixels));
     SDL_RenderClear(renderer->renderer);
     SDL_Rect dst = {0, 0, renderer->width, renderer->height};
     SDL_RenderCopy(renderer->renderer, renderer->texture, NULL, &dst);
