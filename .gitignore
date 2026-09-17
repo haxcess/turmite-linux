@@ -15,3 +15,6 @@ src/*.d
 # working folders
 /patches/
 /turmite-dumps/
+/tests/mutation_test
+/tests/mutation_stress
+/tests/mutation_stress_tsan

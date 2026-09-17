@@ -8,6 +8,7 @@
 #include "colors.h"
 #define TURMITE_MAX_STATES 4
 #define TURMITE_MAX_RULES 64
+#define RULE_INDEX_RUNTIME UINT16_MAX
 
 /* A rule is a tiny table-driven state machine. The current internal state and
  * tape color select one RuleAction: write a color, turn/set heading, enter a
@@ -47,5 +48,11 @@ const TurmiteRule *rules_get(size_t index);
 const TurmiteRule *rules_pick(size_t index);
 size_t rules_index_of(const TurmiteRule *rule);
 const char *turn_name(TurnCode turn);
+
+/* Private per-ant RNG state, never the shared universe generator. */
+uint8_t rules_random_complexity(uint32_t *rng, uint8_t maximum);
+void rules_generate(TurmiteRule *out, uint32_t *rng);
+/* Exactly one action field changes; table dimensions are retained. */
+void rules_mutate(TurmiteRule *rule, uint32_t *rng);
 
 #endif

@@ -215,7 +215,12 @@ void ant_clone(Ant *dst, AntColony *colony, const Ant *src, const World *world, 
     const size_t index = ant_index_of(colony, dst);
     dst->rng_state = rng_next(rng);
     if (dst->rng_state == 0) dst->rng_state = (uint32_t)(index + 1u);
-    dst->rule = src->rule;
+    if (ant_rule_index(src) == RULE_INDEX_RUNTIME) {
+        colony->runtime_rules[index] = *src->rule;
+        dst->rule = &colony->runtime_rules[index];
+    } else {
+        dst->rule = src->rule;
+    }
     atomic_store_explicit(&dst->rule_index, atomic_load_explicit(&src->rule_index, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->heading, atomic_load_explicit(&src->heading, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->state, atomic_load_explicit(&src->state, memory_order_relaxed), memory_order_relaxed);
@@ -252,20 +257,27 @@ uint32_t ant_position_y(const AntColony *colony, size_t ant_index)
     return packed_y(ant_packed_position(colony, ant_index));
 }
 
-/* Collision/HALT reincarnation keeps the location but replaces behavior and
- * scheduling parameters, making clobbering the evolutionary mechanism. */
-void ant_mutate_in_place(Ant *ant)
+/* Scheduler owns these operations after the worker releases its lease.
+ * Collision edits only the rule; HALT creates a fresh behavioral phenotype. */
+void ant_mutate_in_place(Ant *ant, AntColony *colony)
 {
-    const TurmiteRule *rule = rules_pick(ant_rng_uniform(&ant->rng_state, (uint32_t)rules_count()));
-    ant->rule = rule;
-    atomic_store_explicit(&ant->rule_index, (uint16_t)rules_index_of(rule), memory_order_relaxed);
+    TurmiteRule *private_rule = &colony->runtime_rules[ant_index_of(colony, ant)];
+    *private_rule = *ant->rule;
+    rules_mutate(private_rule, &ant->rng_state);
+    ant->rule = private_rule;
+    atomic_store_explicit(&ant->rule_index, RULE_INDEX_RUNTIME, memory_order_relaxed);
+}
+
+void ant_rebirth_random(Ant *ant, AntColony *colony)
+{
+    TurmiteRule *private_rule = &colony->runtime_rules[ant_index_of(colony, ant)];
+    rules_generate(private_rule, &ant->rng_state);
+    ant->rule = private_rule;
+    atomic_store_explicit(&ant->rule_index, RULE_INDEX_RUNTIME, memory_order_relaxed);
     atomic_store_explicit(&ant->heading, (uint8_t)ant_rng_uniform(&ant->rng_state, 4u), memory_order_relaxed);
-    atomic_store_explicit(&ant->state, (uint8_t)ant_rng_uniform(&ant->rng_state, rule->states), memory_order_relaxed);
+    atomic_store_explicit(&ant->state, (uint8_t)ant_rng_uniform(&ant->rng_state, private_rule->states), memory_order_relaxed);
     reset_schedule(ant, &ant->rng_state);
-    atomic_fetch_and_explicit(&ant->flags,
-                              ~(uint32_t)(ANT_F_CLOBBERED | ANT_F_EXPIRED | ANT_F_DRAINING | ANT_F_HALTED | ANT_F_DISPLACED),
-                              memory_order_acq_rel);
-    atomic_fetch_or_explicit(&ant->flags, ANT_F_ENABLED, memory_order_release);
+    atomic_fetch_and_explicit(&ant->flags, ~(uint32_t)(ANT_F_DRAINING | ANT_F_EXPIRED), memory_order_acq_rel);
 }
 
 uint8_t ant_occupant_at(const AntColony *colony, uint32_t x, uint32_t y)
@@ -321,7 +333,7 @@ static bool mark_collision_loser(Ant *loser, AntColony *colony)
  * Empty destinations take one CAS. On contact, token balance is "health";
  * healthier ant wins, with lower ant index as deterministic tie-breaker.
  * A winner replaces the resident byte; the loser becomes displaced/clobbered
- * and is later reincarnated by the scheduler after it can reclaim its position. */
+ * and is paused/mutated by the scheduler before reclaiming its position. */
 static bool move_claim(Ant *self, AntColony *colony,
                        uint32_t old_x, uint32_t old_y,
                        uint32_t new_x, uint32_t new_y)
@@ -382,7 +394,7 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
 {
     uint32_t f = flags_load(ant);
     if (!(f & ANT_F_ENABLED)) return 0;
-    if (f & ANT_F_HALTED) return 0;
+    if (f & (ANT_F_HALTED | ANT_F_CLOBBERED | ANT_F_WAITING | ANT_F_DISPLACED)) return 0;
 
     const size_t self_index = ant_index_of(colony, ant);
     const uint32_t initial_position = atomic_load_explicit(&colony->positions[self_index], memory_order_relaxed);
@@ -400,6 +412,8 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
      * enough per instruction. Tape read/write remains deliberately non-atomic as
      * a transaction even though each individual byte access is atomic. */
     while (executed < quantum) {
+        /* A concurrent collision may finish this instruction, never the grant. */
+        if (flags_load(ant) & (ANT_F_CLOBBERED | ANT_F_HALTED)) break;
         atomic_fetch_sub_explicit(&ant->tokens_fp, TOKEN_FP_ONE, memory_order_relaxed);
 
         const size_t idx = (size_t)y * width + x;
@@ -418,7 +432,7 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
         if (action->halt) {
             atomic_store_explicit(&ant->state, state, memory_order_relaxed);
             atomic_store_explicit(&ant->heading, heading, memory_order_relaxed);
-            atomic_fetch_or_explicit(&ant->flags, ANT_F_CLOBBERED, memory_order_acq_rel);
+            atomic_fetch_or_explicit(&ant->flags, ANT_F_HALTED, memory_order_acq_rel);
             ++executed;
             break;
         }
@@ -434,7 +448,10 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
             const uint32_t old_y = y;
             x = (uint32_t)nx;
             y = (uint32_t)ny;
-            (void)move_claim(ant, colony, old_x, old_y, x, y);
+            if (!move_claim(ant, colony, old_x, old_y, x, y)) {
+                ++executed;
+                break;
+            }
         }
 
         ++executed;

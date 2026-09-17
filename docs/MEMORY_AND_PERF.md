@@ -1,6 +1,6 @@
 # Memory and performance
 
-This describes current storage and profiling interfaces. Earlier layouts and measurements are retained in [OPTIMIZATION_NOTES.md](OPTIMIZATION_NOTES.md).
+This describes current storage and profiling interfaces. Earlier layouts and measurements are retained in [OPTIMIZATION_NOTES.md](history/OPTIMIZATION_NOTES.md).
 
 ## Per-cell storage
 
@@ -35,7 +35,7 @@ Each occupancy byte is 0 or ant index + 1. Collision discovery is O(1), using co
 
 The 32 published positions occupy 128 bytes and are aligned to 64 bytes. Packing is `(y << 16) | x`, limiting dimensions to 65535 per axis. Positions are published at quantum boundaries; occupancy is the live residency index during execution. The enabled mask remains in the colony but no longer drives a collision scan.
 
-The reviewed host build reports `sizeof(Ant)=40`, `sizeof(AntStats)=16`, and `sizeof(AntColony)=1984`. These are ABI-dependent, not STM32 layout guarantees. The colony size includes inline metadata but excludes the allocated occupancy array. Recheck with:
+The reviewed host build reports `sizeof(Ant)=40`, `sizeof(AntStats)=16`, and `sizeof(AntColony)=11968`. These are ABI-dependent, not STM32 layout guarantees. The colony size includes 32 private runtime rule tables (9,984 bytes on this ABI) but excludes the allocated occupancy array. Hot `Ant` metadata remains 40 bytes; the scheduler adds 32 recovery timestamps (256 bytes). These costs are per universe. Rule tables must not be copied by pointer when cloning variants. Recheck with:
 
 ```sh
 make struct-report

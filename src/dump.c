@@ -292,7 +292,7 @@ int dump_write(const DumpCapture *capture, const World *world, const AntColony *
             fprintf(manifest, "%04zu\t%u\t%u\t%u\t%u\t%u\t%d\t%d\t%u\t%u\t%u\t%s\t%s\t%.9g\t%.9g\t%.9g\t%u\t%.9g\t%" PRIu64 "\t%" PRIu64 "\n",
                     ordinal, a->id, a->enabled, a->clobbered, a->expired, a->draining,
                     a->x, a->y, a->heading, a->state, a->rule_index,
-                    rule ? rule->id : "?", rule ? rule->name : "?",
+                    rule ? rule->id : "runtime", rule ? rule->name : "Runtime rule (not retained)",
                     a->tokens, a->token_rate, a->token_capacity, a->weight, a->fair_credit,
                     a->instructions, a->mutations);
         }

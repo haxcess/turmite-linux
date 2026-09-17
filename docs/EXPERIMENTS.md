@@ -42,7 +42,7 @@ The divisor changes accrual; minimum service changes burst release. Initial, clo
 - `R` clears and reseeds the universe. `--minutes 0.25` exercises the same restart lifecycle every 15 seconds; it does not exit the process.
 - `H` toggles the HUD. There are no ant labels on the world.
 
-Collision counts report newly marked losers. The current instruction loop can continue after displacement; treat immediate collision-stop behavior as an open correctness check, detailed in [SPEC.md](SPEC.md).
+Collision counts report newly marked losers. A loser stops at an instruction boundary, pauses for 50 ms, and gets one rule-field edit before reclaiming its cell. HALT generates a fresh random rule/phenotype instead. Run `make mutation-test` for deterministic lifecycle checks and concurrent stress; see [SPEC.md](SPEC.md).
 
 ## Fixed-palette display and logical captures
 

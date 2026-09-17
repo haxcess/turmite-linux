@@ -14,9 +14,9 @@ Separate portable scheduling/token policy from Linux locking, waits, clocks, and
 
 Define ownership and synchronization for every shared field, including flags, leases, token health, positions, RNG state, counters, and reset state. Current `_Atomic` fields and pthread objects cannot simply be copied into a shared linker section as a complete protocol. Audit atomic widths and operations with the selected toolchain.
 
-Use a defined cross-image representation for rule references. The Linux `Ant` contains a pointer into its image's static rule catalogue; separately linked CM7/CM4 images must not assume those pointers are interchangeable. Rule indices provide an existing starting point.
+Use a defined cross-image representation for rule references. A Linux `Ant` points to either a static catalogue rule or a private runtime table. Separately linked CM7/CM4 images must not assume those pointers are interchangeable. Catalogue indices can identify built-in rules, but runtime index 65535 is only a sentinel; runtime tables require explicit shared storage and ownership.
 
-Resolve the Linux collision-loser continuation issue and specify population-pressure behavior before treating the interpreter as the embedded behavioral contract. See [../SPEC.md](../SPEC.md).
+Port the Linux instruction-boundary collision stop, 50 ms recovery, and lease-protected rule mutation. Validate population-pressure behavior and retained-cell recovery in the embedded scheduler. See [../SPEC.md](../SPEC.md).
 
 ## 3. Create the firmware projects
 
@@ -79,3 +79,8 @@ First establish through SWD/UART that:
 - the intended lifecycle can restart safely.
 
 Then add the display as an independently scheduled observer. Its refresh cadence, snapshot strategy, conversion buffers, and transport/DMA behavior should follow the selected display requirements. The simulation must not assume a 60 Hz SDL loop or an e-paper refresh cycle.
+
+
+## Runtime rule ownership
+
+Linux now has a private 4-state × 6-color rule slot per ant, separate from its hot metadata. Collision recovery waits 50 ms, changes one action field without changing the ant's other phenotype, then waits for retained-cell residency. HALT instead generates a fresh rule/phenotype with complexity biased toward smaller dimensions. Both operations require the ant's worker lease to be released; cloned variants copy tables, not pointers. Port the timer and table-publication protocol explicitly. Raw host rule pointers are not cross-image rule identifiers, and the added rule storage must be included in the SRAM budget. See the Linux specification and mutation tests for the chosen semantics; the existing occupancy HSEM helper does not implement this lifecycle.

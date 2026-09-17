@@ -73,31 +73,44 @@ static void retire_draining(Ant *ant, AntColony *colony)
 static inline bool runnable(const Ant *ant)
 {
     uint32_t f = flags_load(ant);
-    return (f & ANT_F_ENABLED) && !(f & (ANT_F_LEASED | ANT_F_CLOBBERED | ANT_F_EXPIRED | ANT_F_HALTED | ANT_F_DISPLACED));
+    return (f & ANT_F_ENABLED) && !(f & (ANT_F_LEASED | ANT_F_CLOBBERED | ANT_F_EXPIRED | ANT_F_HALTED | ANT_F_DISPLACED | ANT_F_WAITING));
 }
 
-/* Collision losers are dormant until their retained position becomes free.
- * Reclaiming that cell is the gate that turns a clobber into a mutation. */
-static void reincarnate_clobbered(Scheduler *scheduler, Ant *ant, uint64_t now_us)
+/* Only idle ants can have their private rule edited. Clear the old event
+ * before reclaiming occupancy: a concurrent new collision then stays pending.
+ * WAITING prevents repeated mutations while a winner still occupies the cell. */
+static void recover_ant(Scheduler *scheduler, Ant *ant, uint64_t now_us)
 {
     uint32_t f = flags_load(ant);
-    if (!(f & ANT_F_CLOBBERED) || (f & ANT_F_LEASED)) return;
-
-    /* The loser stays at its recorded position but is not a resident read-head
-     * until the winner leaves. This provides the intended escape time. */
-    if (!ant_try_reclaim_position(ant, scheduler->colony)) return;
-
-    uint32_t expected = f;
-    uint32_t desired = (f & ~(uint32_t)(ANT_F_CLOBBERED | ANT_F_DISPLACED)) | ANT_F_ENABLED;
-    if (atomic_compare_exchange_strong_explicit(&ant->flags, &expected, desired,
-                                                 memory_order_acq_rel, memory_order_relaxed)) {
-        ant_mutate_in_place(ant);
-        size_t idx = (size_t)(ant - scheduler->colony->ants);
-        scheduler->last_token_us[idx] = now_us;
-        atomic_fetch_add_explicit(&scheduler->colony->stats[idx].mutations, 1u, memory_order_relaxed);
-    } else {
-        /* If another state transition won the race, don't leave a stale claim. */
+    if (!(f & ANT_F_ENABLED) || (f & ANT_F_LEASED)) return;
+    const size_t index = (size_t)(ant - scheduler->colony->ants);
+    if (f & (ANT_F_CLOBBERED | ANT_F_HALTED)) {
+        if (!(f & ANT_F_HALTED)) {
+            if (!scheduler->recovery_at_us[index]) {
+                scheduler->recovery_at_us[index] = now_us + COLLISION_PAUSE_US;
+                return;
+            }
+            if (now_us < scheduler->recovery_at_us[index]) return;
+        }
+        uint32_t desired = (f & ~(uint32_t)(ANT_F_CLOBBERED | ANT_F_HALTED | ANT_F_DISPLACED)) | ANT_F_WAITING;
+        if (!atomic_compare_exchange_strong_explicit(&ant->flags, &f, desired,
+                                                     memory_order_acq_rel, memory_order_relaxed)) return;
+        scheduler->recovery_at_us[index] = 0;
         ant_release_occupancy(ant, scheduler->colony);
+        if (f & ANT_F_HALTED) {
+            ant_rebirth_random(ant, scheduler->colony);
+            scheduler->last_token_us[index] = now_us;
+            scheduler->fair_credit[index] = 0;
+        } else {
+            ant_mutate_in_place(ant, scheduler->colony);
+            atomic_fetch_add_explicit(&scheduler->colony->stats[index].mutations, 1u, memory_order_relaxed);
+        }
+    }
+    f = flags_load(ant);
+    if ((f & ANT_F_WAITING) && !(f & (ANT_F_CLOBBERED | ANT_F_HALTED)) &&
+        ant_try_reclaim_position(ant, scheduler->colony)) {
+        /* Never clear a fresh collision reported during the occupancy claim. */
+        atomic_fetch_and_explicit(&ant->flags, ~(uint32_t)ANT_F_WAITING, memory_order_release);
     }
 }
 
@@ -107,11 +120,12 @@ Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us, size_t *granted_qu
 
     while (!scheduler->stopping) {
         for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
-            reincarnate_clobbered(scheduler, &scheduler->colony->ants[i], now_us);
+            recover_ant(scheduler, &scheduler->colony->ants[i], now_us);
         }
 
         if (atomic_load_explicit(&scheduler->paused, memory_order_acquire)) {
             pthread_cond_wait(&scheduler->work_available, &scheduler->lock);
+            now_us = monotonic_us();
             continue;
         }
 
@@ -324,6 +338,7 @@ int scheduler_init(Scheduler *scheduler, AntColony *colony, SchedulerPolicy poli
     for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
         scheduler->fair_credit[i] = 0.0;
         scheduler->last_token_us[i] = now_us;
+        scheduler->recovery_at_us[i] = 0;
     }
 
     /* The condition variable uses CLOCK_MONOTONIC so wall-clock adjustments do
@@ -374,8 +389,7 @@ int scheduler_double_population(Scheduler *scheduler, World *world, Lfsr32 *rng,
         uint32_t best_tokens = 0;
         for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
             Ant *candidate = &scheduler->colony->ants[i];
-            uint32_t f = flags_load(candidate);
-            if (candidate == dst || !(f & ANT_F_ENABLED) || (f & ANT_F_LEASED)) continue;
+            if (candidate == dst || !runnable(candidate)) continue;
             uint32_t tokens = atomic_load_explicit(&candidate->tokens_fp, memory_order_relaxed);
             if (!src || tokens > best_tokens) {
                 best_tokens = tokens;
@@ -386,6 +400,7 @@ int scheduler_double_population(Scheduler *scheduler, World *world, Lfsr32 *rng,
         ant_clone(dst, scheduler->colony, src, world, rng);
         size_t dst_index = slot;
         scheduler->last_token_us[dst_index] = now_us;
+        scheduler->recovery_at_us[dst_index] = 0;
         atomic_store_explicit(&scheduler->colony->stats[dst_index].instructions, 0, memory_order_relaxed);
         atomic_store_explicit(&scheduler->colony->stats[dst_index].mutations, 0, memory_order_relaxed);
         ++added;

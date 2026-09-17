@@ -1,6 +1,6 @@
 # Optimization history
 
-These notes record earlier passes, their design assumptions, and local measurements. They are historical: later passes supersede earlier statements about collision scans, occupancy RAM, and ant sizes. Current behavior and storage are described in [SPEC.md](SPEC.md) and [MEMORY_AND_PERF.md](MEMORY_AND_PERF.md); outstanding work is in [OPTIMIZATION_QUEUE.md](OPTIMIZATION_QUEUE.md).
+These notes record earlier passes, their design assumptions, and local measurements. They are historical: later passes supersede earlier statements about collision scans, occupancy RAM, and ant sizes. Current behavior and storage are described in [SPEC.md](../SPEC.md) and [MEMORY_AND_PERF.md](../MEMORY_AND_PERF.md); outstanding work is in [OPTIMIZATION_QUEUE.md](../OPTIMIZATION_QUEUE.md).
 
 ## First pass
 
@@ -104,3 +104,10 @@ The display target is now six-color e-ink at roughly 8×6 inches. Hardware and r
 The multi-monitor implementation supports one universe per monitor detected at startup. Current defaults are a single normal window on display 0 with its HUD hidden; `--fullscreen-all` opts into all-monitor operation and `--fullscreen` fills only the selected display. Each universe has its own ant workers and a controller for lifecycle, captures, and CPU frame conversion. Main owns SDL events and presentation. Three prepared frames per universe permit latest-frame handoff without blocking the producer on uploads; obsolete unread frames are dropped. The palette and simulation instruction path are unchanged.
 
 Graphical presentation storage is now 13 bytes per cell per universe (one index snapshot plus three ARGB frames), excluding SDL allocations. Worker counts and dump rings are also per universe. This is an orchestration change, not a measured throughput improvement; the older single-universe benchmark results do not characterize multi-monitor load.
+
+
+## Collision rule edits and HALT rebirth
+
+Collision recovery now stops the losing grant, waits 50 ms, edits one action field, and waits for retained-cell residency. It preserves heading/state and scheduling phenotype instead of replacing them. HALT is separate and generates a fresh rule with smaller complexities favored. Each colony owns 32 private rule slots; cloning variants deep-copies their tables. Startup remains catalogue-only, including three lab exports. Runtime tables are deliberately omitted from debug dumps.
+
+Instruction loops now read collision flags at instruction boundaries, and changed rule behavior alters the workload. Earlier throughput figures are not measurements of this lifecycle. Focused and concurrent mutation tests should precede any optimization of the new stop/recovery path.

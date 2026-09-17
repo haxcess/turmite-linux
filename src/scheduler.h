@@ -12,6 +12,9 @@
 /* The scheduler is a token-gated weighted-fair dispatcher. Ants accumulate
  * execution credit over wall time; workers lease runnable ants for bounded
  * quanta, so logical ants outnumber physical worker threads. */
+/* Pause begins once the losing worker has returned its lease. */
+#define COLLISION_PAUSE_US UINT64_C(50000)
+
 typedef enum {
     SCHED_WFQ = 0
 } SchedulerPolicy;
@@ -34,6 +37,7 @@ typedef struct {
     /* fair_credit rises by ant weight while eligible and falls by work done. */
     double fair_credit[TURMITE_MAX_ANTS];
     uint64_t last_token_us[TURMITE_MAX_ANTS];
+    uint64_t recovery_at_us[TURMITE_MAX_ANTS]; /* scheduler-lock owned */
 
     _Atomic size_t quantum;
     _Atomic size_t min_service;

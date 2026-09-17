@@ -30,7 +30,8 @@ enum {
     ANT_F_EXPIRED   = 1u << 3,
     ANT_F_DRAINING  = 1u << 4,
     ANT_F_HALTED    = 1u << 5,
-    ANT_F_DISPLACED = 1u << 6
+    ANT_F_DISPLACED = 1u << 6,
+    ANT_F_WAITING   = 1u << 7 /* mutated/reborn, awaiting residency */
 };
 
 typedef struct Ant Ant;
@@ -65,6 +66,9 @@ struct AntColony {
     Ant ants[TURMITE_MAX_ANTS];
     AntStats stats[TURMITE_MAX_ANTS];
 
+    /* Cold, private tables keep mutable rules out of the hot ant metadata. */
+    TurmiteRule runtime_rules[TURMITE_MAX_ANTS];
+
     /* Published positions are compact snapshots, not the collision search.
      * Packing x/y into one word keeps the cross-thread metadata dense. */
     alignas(64) _Atomic uint32_t positions[TURMITE_MAX_ANTS];
@@ -85,7 +89,8 @@ void ant_colony_reset(AntColony *colony);
 void ant_colony_destroy(AntColony *colony);
 void ant_randomize(Ant *ant, AntColony *colony, const World *world, Lfsr32 *rng, const TurmiteRule *rule);
 void ant_clone(Ant *dst, AntColony *colony, const Ant *src, const World *world, Lfsr32 *rng);
-void ant_mutate_in_place(Ant *ant);
+void ant_mutate_in_place(Ant *ant, AntColony *colony);
+void ant_rebirth_random(Ant *ant, AntColony *colony);
 uint16_t ant_rule_index(const Ant *ant);
 uint32_t ant_packed_position(const AntColony *colony, size_t ant_index);
 uint32_t ant_position_x(const AntColony *colony, size_t ant_index);

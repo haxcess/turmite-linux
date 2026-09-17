@@ -34,7 +34,7 @@ int main(void)
                 atomic_store(&ant->tokens_fp,500u<<TOKEN_FP_SHIFT);
                 size_t n=ant_execute_quantum(ant,&colony,&w,500);
                 executed+=(unsigned)n;
-                if (atomic_load(&ant->flags)&ANT_F_CLOBBERED) break;
+                if (atomic_load(&ant->flags)&(ANT_F_CLOBBERED | ANT_F_HALTED)) break;
                 assert(n>0);
             }
             uint32_t hash=2166136261u; unsigned nonzero=0;

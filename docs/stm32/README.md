@@ -1,6 +1,6 @@
 # STM32 port scaffold
 
-This directory contains an initial design and occupancy helper for a proposed STM32H745/H747 dual-core target (CM7 + CM4). The Linux application remains the working reference. No board or specific panel has been selected, and there is no runnable firmware build in this repository.
+The repository’s `stm32/` directory contains an initial design and occupancy helper for a proposed STM32H745/H747 dual-core target (CM7 + CM4). The Linux application remains the working reference. No board or specific panel has been selected, and there is no runnable firmware build in this repository.
 
 The display target is six-color e-ink, roughly 8×6 inches. This physical size does not specify pixel resolution. The board, panel/controller, interface, and refresh policy remain open. Rendering now uses a fixed palette; historical RGB ink and palette drift have been removed.
 
@@ -8,11 +8,11 @@ The display target is six-color e-ink, roughly 8×6 inches. This physical size d
 
 | File | Current role |
 | --- | --- |
-| `include/turmite_stm32_shared.h` | Descriptor and operations for a shared occupancy byte array |
-| `src/turmite_stm32_shared.c` | HAL HSEM claim/replace/release implementation using 16 stripes and FreeRTOS `taskYIELD()` on contention |
-| `include/turmite_stm32_memory.h` | GNU `.turmite_shared` section/alignment attribute; no storage or linker map is supplied |
-| `include/turmite_stm32_port.h` | Declarations for microsecond time, entropy, peer notification, and work waiting; no implementations yet |
-| `INTEGRATION.md` | Proposed bring-up sequence and unresolved integration requirements |
+| `stm32/include/turmite_stm32_shared.h` | Descriptor and operations for a shared occupancy byte array |
+| `stm32/src/turmite_stm32_shared.c` | HAL HSEM claim/replace/release implementation using 16 stripes and FreeRTOS `taskYIELD()` on contention |
+| `stm32/include/turmite_stm32_memory.h` | GNU `.turmite_shared` section/alignment attribute; no storage or linker map is supplied |
+| `stm32/include/turmite_stm32_port.h` | Declarations for microsecond time, entropy, peer notification, and work waiting; no implementations yet |
+| [INTEGRATION.md](INTEGRATION.md) | Proposed bring-up sequence and unresolved integration requirements |
 
 The Linux Makefile does not compile these sources. The scaffold requires external HAL and FreeRTOS headers. `src/ant.c` still accesses Linux atomic occupancy directly, and `src/scheduler.c` still combines scheduling policy with pthread synchronization.
 
@@ -37,14 +37,14 @@ The rule catalogue/interpreter, LFSR algorithm, Q16 tokens, WFQ-like credit poli
 - Replace direct occupancy atomics with a compile-time backend interface.
 - Split scheduling policy from pthread locks, condition variables, and POSIX time.
 - Supply MCU time and entropy providers instead of host calls.
-- Define shared layout without assuming each image's static rule pointers identify the same data; stable rule indices are already available.
+- Define shared layout for catalogue references and private runtime rule tables; a catalogue index alone cannot identify a runtime table.
 - Review all atomic operations, especially read-modify-write fields and 64-bit diagnostics, for the selected cross-core protocol and toolchain.
 - Provide explicit storage placement/allocation and boot/reset ownership.
 - Connect the existing portable six-color frame/conversion interface to a driver for the chosen panel, including packing, transfer ownership, and refresh scheduling.
 
 The core now allocates roughly two bytes per cell for tape and occupancy. Rendering owns separate buffers; no RGB allocation is required by the core. The portable `render_codes()` helper can map a captured frame directly to panel-specific byte codes, without RGB. It does not implement transport or refresh. See [../RENDERING.md](../RENDERING.md). The main Linux application additionally retains a large capture ring. Neither should be copied into firmware without a memory budget. See [../MEMORY_AND_PERF.md](../MEMORY_AND_PERF.md).
 
-Before preserving collision behavior in a shared interpreter, resolve the current Linux executor's continuation after failed movement claims, documented in [../SPEC.md](../SPEC.md). A passed host smoke test does not validate the HSEM implementation.
+Port the current Linux instruction-boundary collision stop, timed mutation recovery, and HALT rebirth described in [the specification](../SPEC.md), then validate them across both cores. A passed host smoke test does not validate the HSEM implementation.
 
 ## Next milestone
 

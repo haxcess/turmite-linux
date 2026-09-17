@@ -18,7 +18,7 @@ SRC := \
 OBJ := $(SRC:.c=.o)
 TARGET := turmite
 
-.PHONY: all clean capacity-test rule-catalog rule-lab-test multi-window-test render-test sdl-test core-test tsan-test struct-report bench perf-stat perf-stat-unbatched perf-stat-1w perf-stat-saturated perf-record perf-record-unbatched perf-record-1w perf-record-saturated perf-report
+.PHONY: all clean mutation-test mutation-tsan-test capacity-test rule-catalog rule-lab-test multi-window-test render-test sdl-test core-test tsan-test struct-report bench perf-stat perf-stat-unbatched perf-stat-1w perf-stat-saturated perf-record perf-record-unbatched perf-record-1w perf-record-saturated perf-report
 
 all: $(TARGET)
 
@@ -65,10 +65,11 @@ tests/bench: tests/bench.c src/rng.c src/rules.c src/world.c src/ant.c src/sched
 	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $^ -pthread -lm -o $@
 
 clean:
-	rm -f $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench tests/render_test tests/renderer_sdl_test tests/multi_window_test tests/multi_monitor_app_test tests/scheduler_capacity_test tests/rule_trace tests/rule-traces.js tools/export_rule_catalog tests/generated_rules_check.c tests/generated_rules_check
+	rm -f $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench tests/render_test tests/renderer_sdl_test tests/multi_window_test tests/multi_monitor_app_test tests/scheduler_capacity_test tests/rule_trace tests/rule-traces.js tools/export_rule_catalog tests/generated_rules_check.c tests/generated_rules_check tests/mutation_test tests/mutation_stress tests/mutation_stress_tsan
 
-core-test: tests/headless_smoke tests/scheduler_capacity_test
+core-test: tests/headless_smoke tests/scheduler_capacity_test tests/mutation_test
 	./tests/headless_smoke
+	./tests/mutation_test
 	./tests/scheduler_capacity_test
 
 tests/headless_smoke: tests/headless_smoke.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c
@@ -135,3 +136,20 @@ rule-lab-test: rule-catalog tests/rule_trace
 	$(NODE) tests/export_generated_rules.js > tests/generated_rules_check.c
 	$(CC) $(CFLAGS) -I src tests/generated_rules_check.c -o tests/generated_rules_check
 	./tests/generated_rules_check
+
+# Deterministic recovery tests plus concurrent ownership/capture stress.
+mutation-test: tests/mutation_test tests/mutation_stress
+	./tests/mutation_test
+	./tests/mutation_stress
+
+tests/mutation_test: tests/mutation_test.c src/scheduler.c src/rng.c src/rules.c src/world.c src/ant.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter-out src/scheduler.c,$(filter %.c,$^)) -pthread -lm -o $@
+
+tests/mutation_stress: tests/mutation_stress.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c src/dump.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter %.c,$^) -pthread -lm -o $@
+
+mutation-tsan-test: tests/mutation_stress_tsan
+	TSAN_OPTIONS=halt_on_error=1 ./tests/mutation_stress_tsan
+
+tests/mutation_stress_tsan: tests/mutation_stress.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c src/dump.c $(wildcard src/*.h)
+	$(CC) -O1 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src -fsanitize=thread $(filter %.c,$^) -pthread -lm -o $@

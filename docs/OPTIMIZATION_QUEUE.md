@@ -1,6 +1,6 @@
 # Optimization and porting queue
 
-This is the current queue. [OPTIMIZATION_NOTES.md](OPTIMIZATION_NOTES.md) preserves the historical V4/V5/V6 work and its measurements.
+This is the current queue. [OPTIMIZATION_NOTES.md](history/OPTIMIZATION_NOTES.md) preserves the historical V4/V5/V6 work and its measurements.
 
 ## Implemented
 
@@ -17,7 +17,7 @@ This is the current queue. [OPTIMIZATION_NOTES.md](OPTIMIZATION_NOTES.md) preser
 
 ## Correctness gates before further optimization
 
-1. Check collision-loser execution: the instruction loop currently ignores a failed movement claim and continues the grant without rechecking clobbered status. Establish the intended behavior and cover it with focused tests.
+1. Preserve the tested instruction-boundary stop, 50 ms recovery pause, private rule ownership, and HALT precedence when optimizing the collision path. Measure the new per-instruction flag-read cost before changing publication frequency.
 2. Check best-effort population controls under leases/collisions, and handle random-placement failure before relying on exact population counts.
 3. Check elapsed-time accrual with large slow-motion divisors. Minimum batching is now clamped to each ant's capacity and covered by a dispatch regression test.
 4. Correct single-page dump change counts if those captures need useful deltas; decide which additional metadata is needed for diagnostics.
