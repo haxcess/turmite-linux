@@ -11,9 +11,8 @@
 
 #include "rules.h"
 
-/* Debug capture deliberately stores the logical six-color tape rather than
- * Linux RGB ink. That keeps captures portable and suitable for cycle/stagnation
- * analysis independent of presentation effects. */
+/* Debug capture stores the logical six-color tape. Rendering can consume
+ * these same row-major indices without platform-specific pixel storage. */
 
 /* FNV-1a gives each full tape page a cheap stable fingerprint. Equal hashes are
  * useful for spotting repeated states; changed_cells adds a direct local delta. */

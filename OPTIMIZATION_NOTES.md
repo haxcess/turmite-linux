@@ -1,8 +1,12 @@
-# Optimization pass 1
+# Optimization history
+
+These notes record earlier passes, their design assumptions, and local measurements. They are historical: later passes supersede earlier statements about collision scans, occupancy RAM, and ant sizes. Current behavior and storage are described in [SPEC.md](SPEC.md) and [MEMORY_AND_PERF.md](MEMORY_AND_PERF.md); outstanding work is in [OPTIMIZATION_QUEUE.md](OPTIMIZATION_QUEUE.md).
+
+## First pass
 
 This pass is intentionally conservative: preserve the machine semantics first, then optimize representation and hot loops.
 
-## Memory
+### Memory
 
 The previous `Ant` was 104 bytes on x86-64 in the reference build. The new `Ant` is 72 bytes: about 31% smaller. Across 32 ants, that reduces the colony object from roughly 3328 bytes to 2320 bytes before allocator/object overhead.
 
@@ -15,7 +19,7 @@ Changes:
 * each ant owns a small LFSR state rather than participating in a shared runtime RNG
 * scheduler-only token timestamp remains non-atomic
 
-## Hot path
+### Hot path
 
 The instruction path previously called the monotonic clock for every instruction and performed multiple atomic floating-point loads/stores for token accounting. The new path samples time at scheduler boundaries and spends one fixed-point token per instruction.
 
@@ -23,9 +27,9 @@ The instruction loop also avoids the generic `world_index()` helper. Because ant
 
 The scheduler still scans at most 32 ant contexts per dispatch. This is intentionally left as O(32): a more elaborate queue/heap would add complexity while the architectural population ceiling is only 32.
 
-Collision detection remains O(32) by design because occupancy RAM is deliberately excluded from the machine model.
+At this stage, collision detection remained O(32) and occupancy RAM was excluded. V5 later replaced that design with a per-cell occupancy index.
 
-## Important semantic constraint
+### Semantic constraint retained today
 
 Do not replace the world array with a packed 3-bit representation merely for memory savings. Six colors fit in three bits, but packed updates would turn one-cell writes into read-modify-write operations and would interfere with the intended atomic last-write-wins behavior.
 
@@ -73,4 +77,24 @@ Local one-worker measurements (same container, 32 ants, quantum 256, 3 seconds) 
 - batched normal (`min_service=16`): about 76M instructions, ~52 instructions/dispatch
 - saturated (`rate_scale=16`, `min_service=16`): about 94M instructions, ~229 instructions/dispatch
 
-These are directional measurements only; Fedora `perf` remains the authoritative profile for the user's machine.
+These are historical directional measurements, not results for the current checkout. Re-run the benchmark and `perf` targets on the target host before using them to justify further changes.
+
+## Later presentation and control changes
+
+The later Linux presentation pass introduced one world cell per display pixel and defaults to desktop fullscreen. Its windowed/headless default is 1200×800; the standalone benchmark remains 300×200.
+
+That pass added a persistent atomic 32-bit RGB ink plane to `World`, written alongside the logical tape even in headless mode. SDL changes the palette for future writes on a 240-second tint cycle while previously deposited ink remains unchanged. Logical color zero stays black. This added four bytes per cell to core storage and additional work to every tape write; it is not included in the interpretation of the earlier throughput figures above.
+
+The application defaults to minimum service 16 and supports `--token-rate-divisor` for slow accrual without rewriting per-ant phenotypes. Current clones start with full token buckets. Dumps continued to capture logical colors only, so they did not reproduce that historical RGB presentation.
+
+The intended collision-displacement model described in the historical notes is not fully enforced by the current executor: it continues a grant after a failed movement claim. See the current specification before treating the older semantic claims as verified guarantees.
+
+The `stm32/` directory adds an unintegrated 16-stripe HSEM occupancy helper and proposed dual-core integration notes. It does not yet provide runnable firmware or an embedded display backend.
+
+## Rendering separation and fixed six-color output
+
+The subsequent rendering refactor removes the ink plane and palette from `World` and removes RGB work from ant instructions. The selected behavior is a fixed six-color palette, so palette drift and per-write RGB history are removed rather than approximated at frame boundaries.
+
+`renderer.h` / `renderer.c` now define a platform-independent, caller-owned frame of logical indices and allocation-free RGB or display-code conversion. `renderer_sdl.h` / `renderer_sdl.c` contain the SDL adapter and HUD. The Linux host samples world/HUD state before presenting; renderers do not access simulation objects. Core storage drops from about six to two bytes per cell. Graphical snapshots add one byte per cell outside the core, and SDL retains its four-byte pixel buffer.
+
+The display target is now six-color e-ink at roughly 8×6 inches. Hardware and resolution remain unselected; the code-map interface is not a panel driver. Earlier performance measurements above have not been re-established for this refactor.

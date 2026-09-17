@@ -410,11 +410,8 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
         RuleAction fallback = { color, TURN_F, state, false };
         if (!action) action = &fallback;
 
-        /* One instruction deposits both a new logical tape value and the
-         * current Linux display ink for that value. Neither write is part of a
-         * transaction; concurrent ants retain the universe's last-writer-wins
-         * behavior. */
-        world_store_inked(world, idx, action->write_color);
+        /* Presentation observes the tape independently of ant execution. */
+        world_store_cell(world, idx, action->write_color);
 
         state = action->next_state;
         heading = apply_turn(heading, action->turn);

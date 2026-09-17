@@ -1,54 +1,91 @@
-# Turmite Universe — Linux Concept Specification
+# Turmite Universe — Current implementation specification
 
-## Goal
+This document describes the checked-in Linux implementation. Planned STM32 behavior is identified separately. Optimization version names describe development stages, not separate supported runtime modes.
 
-A small embedded-oriented computational artwork in which logical turmites (ants) execute concurrently against a shared two-dimensional, six-color memory space. Linux is the prototype substrate; a later RTOS MCU version should preserve the machine model.
+## Machine and rules
 
-## Fixed rules
+- C17 with pthread workers; Linux schedules the workers normally.
+- A toroidal 2-D tape contains six logical colors, stored as independent relaxed atomic bytes.
+- The application supports initial populations of 2, 4, 8, 16, or 32; the fixed context limit is 32.
+- The catalogue currently contains 18 rules. A rule declares its active colors/states within a table supporting six colors and four states.
+- Each instruction spends one token, reads the tape, selects an action, writes a color, updates state/heading, and optionally moves or halts.
+- Turns can be relative or absolute. `TURN_H` holds position; it is separate from the action's `halt` flag.
+- An out-of-range state/color uses a fallback that preserves color and state and moves forward. Colors unused by a particular rule remain part of the shared six-color world.
+- HALT support marks an ant clobbered for reincarnation rather than decrementing the population. The current catalogue contains no HALT actions.
+- Tape writes and movement are separate operations; rendering does not run in the instruction path. There is no transactional turmite step or global simulation tick.
 
-- C17 implementation.
-- SDL2 graphical window.
-- World cell is 4x4 screen pixels.
-- Six cell colors.
-- Maximum 32 ants; population levels are 2, 4, 8, 16, 32.
-- Two worker threads by default; Linux schedules them normally.
-- An ant can execute on at most one worker at a time.
-- The scheduler is a shared concurrent object protected by normal synchronization.
-- World cells use relaxed C atomics; a turmite transition is not a transaction.
-- Last world write wins.
-- No occupancy RAM; collision detection scans ant contexts.
-- Collision winner is the ant with greater accumulated token health. Equal health uses lower ant ID as the winner.
-- The weaker ant is clobbered, keeps its position, and is reincarnated with a random rule, direction, internal state, and scheduling phenotype.
-- Newborns reread the cell on their next instruction.
-- Token bucket accounting uses fractional time. One token buys one turmite instruction.
-- The scheduler runs when a worker needs another ant; there is no global ant simulation tick.
-- Initial scheduler policy is weighted-fair/deficit-like scheduling and is selected at universe initialization. Only WFQ-like policy is implemented initially.
-- Quantum is a global scheduler parameter and is controllable at runtime.
-- Ants can own mutable scheduling parameters. The rule-action data model leaves room for rule-driven schedule mutations; the first library does not yet exercise that extension.
-- Doubling clones live ants into inactive contexts at random positions while retaining rule, direction, state, and scheduler phenotype; clone token balance starts empty.
-- Halving places the weakest eligible ants under drain pressure by setting token generation to zero. They expire when their token budget is exhausted.
-- Rules come from a built-in library and may grow over time.
-- A separate gene pool/bookmark concept is reserved for future evolution experiments.
-- Randomness is a Galois LFSR seeded from host entropy (or an explicit command-line seed). The seed is therefore enough to define the initial random sequence, while live Linux scheduling can still cause concurrent divergence between runs.
-- SDL renders at 60 FPS while workers continue running independently.
-- The framebuffer is an observation window into the current world.
-- No e-ink behavior is simulated in the Linux concept.
-- A five-minute lifecycle is emulated by a timer; the final MCU should replace this with a genuine watchdog reset.
-- Pressing `Q` performs a debug quit and writes a headless rolling tape capture. The default is 127 pages sampled at 1 Hz. Accepted page counts are 1, 3, 7, 15, 31, 63, 127, 255, 511, and 1023.
-- Each captured page contains the six-color world plus a forensic metadata snapshot: world hash/change count, age, LFSR state, active population, quantum, dispatch count, collisions, total instructions, and per-ant position/rule/state/token/scheduler/health metadata.
-- Debug pages are SDL-independent raw byte images: one uint8 color index per world cell in row-major order.
+## Scheduling and tokens
 
-## Intentionally unresolved for later experiments
+The shared scheduler uses a pthread mutex and condition variable. A worker leases an eligible ant, executes outside the lock, and releases the lease with its executed instruction count. An ant cannot have two worker leases at once.
 
-- Exact weighted-fair algorithm beyond the compact first implementation.
-- Rule-driven scheduler-parameter mutations.
-- More scheduler policies such as CBWFQ-like classes or WRED-like behaviors.
-- Better population pressure/drop semantics.
-- Exact e-paper refresh behavior.
-- MCU/display selection.
+The only policy is a compact WFQ-like credit scan, not a formal virtual-finish-time implementation. Each eligible candidate gains its weight in credit; the highest score wins, with lower ant index breaking ties. Executed work is subtracted on release. Fair credit uses `double`; token balances use unsigned Q16 fixed point.
 
-## V6 execution batching clarification
+Token accrual is lazy at scheduler boundaries using monotonic microseconds. Fresh and mutated phenotypes randomize:
 
-`quantum` remains the maximum number of instructions in one dispatch. `min_service` is a scheduler batching threshold: a normal ant is not dispatched until it has at least `min(min_service, quantum)` whole tokens available. This does not create tokens or alter the ant's configured token generation rate; it only changes burst size. Draining ants bypass the threshold so population reduction can consume their remaining token budget.
+- token rate: 50,000..2,000,000 instructions/second before global scaling;
+- bucket capacity: 128..4096 whole tokens;
+- weight: 1..16.
 
-During a worker lease, the atomic occupancy index is the authoritative read-head residency structure. Packed ant positions are published at dispatch boundaries for debugging, dump capture, cloning/reincarnation, and cold-path observation; they are not consulted by the normal collision hot path.
+Fresh and mutated ants start with full buckets. `--token-rate-divisor` slows accrual without changing inherited per-ant rates. The benchmark additionally exposes a rate multiplier. Accrual clamps elapsed time to one second per update.
+
+`quantum` caps the instructions in a lease. A normal ant needs at least `min(min_service, quantum)` whole tokens before dispatch; its grant can exceed that threshold, up to its available tokens and quantum. Draining ants bypass the batching threshold. If no work is eligible, workers use a condition-variable timed wait of approximately 1 ms.
+
+Application defaults are 8 ants, 2 workers, quantum 32, minimum service 16, and divisor 1. The command line permits 1..8 workers and quantum/minimum-service values of 1..4096. The standalone benchmark has separate defaults and limits documented in [MEMORY_AND_PERF.md](MEMORY_AND_PERF.md).
+
+## Occupancy, collisions, and mutation
+
+The derived occupancy index stores one atomic byte per cell: 0 means empty; 1..32 identify ant index + 1. Movement conditionally releases the old cell, then claims the destination with compare-and-swap. This transfer is not one atomic transaction.
+
+On contact, greater current token balance wins; equal health favors lower ant index. A winning challenger replaces the resident occupancy byte. The loser is marked `CLOBBERED | DISPLACED`. The scheduler attempts reincarnation only when the ant is no longer leased and can reclaim its published position. Reincarnation randomizes rule, heading, state, token phenotype, and weight while retaining that published position.
+
+During a lease, position/heading/state are worker-local. Packed positions are published once per quantum as `(y << 16) | x`; they are not used for hot-path collision discovery. The live residency index is `occupancy[]`.
+
+**Current limitation:** `ant_execute_quantum()` ignores a failed movement claim and does not recheck clobbered/displaced flags inside its instruction loop. A collision loser can continue its remaining grant and publish a later position. The intended immediate displacement/escape behavior is therefore not fully enforced. The current smoke test checks final occupancy consistency, not this instruction-level contract.
+
+## Population controls
+
+Doubling requests up to twice the current population, capped at 32. Each free destination slot clones the healthiest eligible non-leased source available at that point. A clone inherits rule, heading, state, rate, capacity, and weight, receives a new RNG stream and random empty position, and starts with a **full** token bucket. Clones created earlier in the same operation can themselves become sources.
+
+Halving selects weak, enabled, non-leased ants that are not already draining and sets their token generation to zero. They expire when their remaining balance falls below one whole token; retirement releases occupancy and decrements the population.
+
+These are best-effort requests against currently available ants. Busy leases can prevent reaching the requested change in one keypress, and collision reincarnation clears draining state. Intermediate populations need not be powers of two. Initial placement uses bounded random probing rather than an exhaustive empty-cell search; callers currently assume placement succeeds.
+
+## Randomness
+
+The universe generator and per-ant runtime generators use a 32-bit Galois LFSR with feedback mask `0x80200003`. Zero seeds are remapped. Linux entropy comes from `/dev/urandom`, with a process/time fallback; `--seed` supplies an explicit initial seed.
+
+An explicit seed establishes initial RNG sequences, not deterministic concurrent execution. Timing affects token accrual, dispatch, and collisions. Automatic and manual restarts choose fresh entropy even if the first universe used `--seed`.
+
+## Display and memory
+
+SDL defaults to borderless desktop fullscreen on display 0, using the selected display's reported dimensions for the world. Windowed/headless defaults are 1200×800. The application requires at least 160×120; `world_init()` permits dimensions up to 65535 per axis for packed positions, subject to allocation limits.
+
+One cell maps to one display pixel. The render loop targets 60 FPS and does not gate worker execution. There are no ant labels; an optional HUD shows population, workers, quantum, minimum service, age, seed, collisions, and pause state.
+
+`World` contains only `data[]`: one atomic byte per cell containing the logical index. Occupancy remains a separate core allocation. There are no ink buffers, palette fields, or render callbacks in the core.
+
+The Linux host reads a row-major snapshot into its display buffer and passes a `RenderFrame` to the SDL backend. Reads remain independent observations while workers run, but the completed snapshot is stable for rendering. HUD values are sampled separately into plain metadata. Neither the portable renderer nor SDL accesses `World`, ants, or scheduler state.
+
+Portable `render_argb()` maps indices through a caller-provided six-color RGB palette; Linux uses fixed black, white, red, yellow, green, and blue. `render_codes()` maps the same indices to caller-provided byte codes for another display backend. Invalid indices map to logical zero. Conversion functions allocate no storage and depend on no OS, hardware driver, or simulation structures.
+
+Palette drift and historical per-write ink have been removed. A same-color rewrite has no distinct visual state. Resetting the tape is enough to reset the displayed image on its next frame; there is no presentation history to clear. Headless mode allocates neither the graphical snapshot nor RGB conversion buffers. See [RENDERING.md](RENDERING.md) for frame ownership and [MEMORY_AND_PERF.md](MEMORY_AND_PERF.md) for storage costs.
+
+## Lifecycle and observation
+
+The Linux lifecycle is a software timer, default five minutes. Expiry or `R` stops and joins workers, clears state, reseeds, reinitializes the scheduler, and starts another universe. The process continues until quit. A future hardware-reset lifecycle is not implemented.
+
+Pause prevents new normal dispatches, but outstanding leases can finish. Lifecycle time, capture, and rendering continue, and elapsed-time token accrual can refill buckets on resume. Runtime quantum changes are not retained across restarts; configured startup values are reapplied.
+
+`Q` stops workers, takes a final capture, writes the retained ring, and exits. `ESC`/window close exits without writing a dump. Headless input supports `Q`/`q` followed by Enter.
+
+Captures default to 127 pages at one-second intervals. Valid capacities are 1, 3, 7, 15, 31, 63, 127, 255, 511, and 1023; indexing uses modulo capacity. Each raw page stores only the logical tape. Metadata includes age, FNV-1a hash, changed cells, global RNG state, population, quantum, minimum service, counters, and ant position/rule/token/credit snapshots.
+
+Live captures are not globally synchronized snapshots. Published ant positions can lag current execution. Captures store logical colors suitable for the fixed-palette renderer, but omit per-ant RNG state and the global token-rate divisor, so they cannot fully reconstruct a run. With one retained page, the change count compares the newly overwritten slot with itself and is always zero. A restart discards the previous universe's capture ring.
+
+## Remaining work and boundaries
+
+- Check collision-loser execution and population-pressure semantics with focused tests before porting them.
+- A batching threshold above an ant's capacity prevents normal dispatch for that ant; there is no per-ant capacity clamp on the threshold.
+- The one-second accrual clamp can discard elapsed refill time with large slow-motion divisors, where a bucket may take longer than one second to fill.
+- Rule-driven scheduling mutations, additional scheduler policies, and a gene-pool/bookmark interface are not implemented. `RuleAction` currently contains only write, turn, next-state, and halt fields.
+- STM32 timing, entropy, scheduler synchronization, shared-state layout, startup, lifecycle, and display integration remain to be implemented. H745/H747 is the existing proposed target; the board and specific panel remain unselected. The display target is six-color e-ink, approximately 8×6 inches, with pixel resolution and interface still open. See [stm32/README.md](stm32/README.md).

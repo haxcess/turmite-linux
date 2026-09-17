@@ -2,42 +2,18 @@
 
 #include <stdlib.h>
 
-/* Base presentation colors. Logical color zero is also the blank paper color
- * and remains invariant; colors 1..5 may be transformed by the Linux renderer
- * before future writes snapshot them into the ink plane. */
-const uint32_t TURMITE_DISPLAY_BASE_PALETTE[TURMITE_COLORS] = {
-    0x000000u, /* black */
-    0xF2F2F2u, /* white */
-    0xE84A5Fu, /* red */
-    0xF5D547u, /* yellow */
-    0x58D68Du, /* green */
-    0x4EA5D9u  /* blue */
-};
-
-/* Allocate the logical tape and Linux visual paper as flat row-major arrays.
- * Keeping indexing trivial is important because every ant instruction touches
- * the tape and the renderer scans the ink plane every frame. */
 int world_init(World *world, int width, int height)
 {
     if (!world || width <= 0 || height <= 0 || width > 65535 || height > 65535) return -1;
-    world->width = width;
-    world->height = height;
-    world->cells = (size_t)width * (size_t)height;
+    *world = (World){ .width = width, .height = height,
+                      .cells = (size_t)width * (size_t)height };
     world->data = calloc(world->cells, sizeof(*world->data));
-    world->ink = calloc(world->cells, sizeof(*world->ink));
-    if (!world->data || !world->ink) {
-        free(world->data);
-        free(world->ink);
-        world->data = NULL;
-        world->ink = NULL;
-        world->cells = 0;
+    if (!world->data) {
+        *world = (World){0};
         return -1;
     }
-
-    for (size_t i = 0; i < TURMITE_COLORS; ++i)
-        atomic_init(&world->ink_palette[i], TURMITE_DISPLAY_BASE_PALETTE[i]);
-
-    world_clear(world);
+    for (size_t i = 0; i < world->cells; ++i)
+        atomic_init(&world->data[i], 0);
     return 0;
 }
 
@@ -45,26 +21,14 @@ void world_destroy(World *world)
 {
     if (!world) return;
     free(world->data);
-    free(world->ink);
-    world->data = NULL;
-    world->ink = NULL;
-    world->cells = 0;
-    world->width = world->height = 0;
+    *world = (World){0};
 }
 
 void world_clear(World *world)
 {
-    if (!world || !world->data || !world->ink) return;
-
-    /* Logical color zero is also the physical blank paper color. Keep it true
-     * black so untouched cells and later rule writes of color zero agree. */
-    const uint32_t background = TURMITE_DISPLAY_BASE_PALETTE[0];
-    atomic_store_explicit(&world->ink_palette[0], background, memory_order_relaxed);
-
-    for (size_t i = 0; i < world->cells; ++i) {
+    if (!world || !world->data) return;
+    for (size_t i = 0; i < world->cells; ++i)
         atomic_store_explicit(&world->data[i], 0u, memory_order_relaxed);
-        atomic_store_explicit(&world->ink[i], background, memory_order_relaxed);
-    }
 }
 
 uint8_t world_load(const World *world, size_t index)
@@ -76,24 +40,10 @@ uint8_t world_load(const World *world, size_t index)
 void world_store(World *world, size_t index, uint8_t value)
 {
     if (!world || index >= world->cells) return;
-    world_store_inked(world, index, value);
+    world_store_cell(world, index, value);
 }
 
-uint32_t world_ink_load(const World *world, size_t index)
-{
-    if (!world || !world->ink || index >= world->cells) return TURMITE_DISPLAY_BASE_PALETTE[0];
-    return atomic_load_explicit(&world->ink[index], memory_order_relaxed);
-}
-
-void world_set_ink_palette(World *world, const uint32_t palette[TURMITE_COLORS])
-{
-    if (!world || !palette) return;
-    for (size_t i = 0; i < TURMITE_COLORS; ++i)
-        atomic_store_explicit(&world->ink_palette[i], palette[i] & 0x00ffffffu, memory_order_relaxed);
-}
-
-/* Coordinates wrap toroidally. This helper is used by cold/control paths;
- * the ant hot loop uses equivalent branch-based wrapping to avoid modulo cost. */
+/* Coordinates wrap toroidally; the executor uses equivalent branch wrapping. */
 size_t world_index(const World *world, int x, int y)
 {
     int xx = x % world->width;

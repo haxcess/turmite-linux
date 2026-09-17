@@ -1,78 +1,51 @@
-# STM32H7 port
+# STM32 port scaffold
 
-This directory is the start of the embedded port of Turmite Universe.
+This directory contains an initial design and occupancy helper for a proposed STM32H745/H747 dual-core target (CM7 + CM4). The Linux application remains the working reference. No board or specific panel has been selected, and there is no runnable firmware build in this repository.
 
-The first target is the dual-core STM32H745/H747 family (Cortex-M7 + Cortex-M4). The Linux implementation remains the reference model for turmite rules and scheduler behaviour; STM32-specific code supplies timing, inter-core synchronization, FreeRTOS workers, and eventually the e-paper display driver.
+The display target is six-color e-ink, roughly 8×6 inches. This physical size does not specify pixel resolution. The board, panel/controller, interface, and refresh policy remain open. Rendering now uses a fixed palette; historical RGB ink and palette drift have been removed.
 
-## Core split
+## What exists
 
-### CM7
+| File | Current role |
+| --- | --- |
+| `include/turmite_stm32_shared.h` | Descriptor and operations for a shared occupancy byte array |
+| `src/turmite_stm32_shared.c` | HAL HSEM claim/replace/release implementation using 16 stripes and FreeRTOS `taskYIELD()` on contention |
+| `include/turmite_stm32_memory.h` | GNU `.turmite_shared` section/alignment attribute; no storage or linker map is supplied |
+| `include/turmite_stm32_port.h` | Declarations for microsecond time, entropy, peer notification, and work waiting; no implementations yet |
+| `INTEGRATION.md` | Proposed bring-up sequence and unresolved integration requirements |
 
-- owns universe initialization and the global scheduler policy
-- runs one ant worker
-- controls population changes and five-minute lifecycle
-- eventually owns the e-paper refresh task
-- initializes shared-memory regions before releasing CM4
+The Linux Makefile does not compile these sources. The scaffold requires external HAL and FreeRTOS headers. `src/ant.c` still accesses Linux atomic occupancy directly, and `src/scheduler.c` still combines scheduling policy with pthread synchronization.
 
-### CM4
+## Proposed core split
 
-- runs the second ant worker
-- requests/receives logical ant work from the shared scheduler state
-- does not own display or universe lifecycle policy
+CM7 would initialize shared state, own global scheduler/control policy, run one worker, manage the five-minute lifecycle, and own display refresh. CM4 would run the second worker after CM7 signals that initialization is complete. Their different execution speeds would remain part of the artwork's physical environment.
 
-The two physical cores are intentionally asymmetric. Their different clock rates are part of the physical execution environment rather than something the simulation hides.
+The proposal uses separate FreeRTOS instances on the two cores. Planned tasks are a worker and control task on CM7, a worker on CM4, and a later CM7 display task. Cross-core notifications would use HSEM events or a small shared mailbox; OpenAMP is not part of the initial design. None of these tasks or notification protocols is implemented here.
 
-## Shared memory
+## Shared memory and occupancy
 
-Shared cross-core state belongs in a non-cacheable SRAM region configured by the MPU/linker scripts. This includes:
+World cells, occupancy, and the cross-core parts of ant/scheduler state need a shared SRAM layout agreed by both images. The current plan uses a CM7 MPU region configured as non-cacheable. Stacks and worker-local execution state should remain private where possible. A section attribute alone does not establish placement, initialize storage, or make objects safe across cores.
 
-- six-color world cells
-- read-head occupancy index
-- ant state required by the other core
-- scheduler/mailbox state
+The occupancy helper reserves HSEM channels **0..15**. A cell maps to `cell & 15`; claim, replace, and conditional release protect one occupancy byte with that stripe. Memory barriers surround the critical section. Diagnostic loads do not take a semaphore. Storage must be supplied and zeroed before use, and owner IDs are intended to be 1..32.
 
-Core-private stacks, temporary ant execution state, and display conversion buffers should stay in core-local/cacheable RAM where possible.
+This helper only protects occupancy operations. Ant flags, token health, lease publication, counters, and scheduler/control state still need a cross-core protocol. Same-core task/interrupt access also needs a defined locking policy. The plan keeps logical tape writes independent rather than serializing entire turmite transitions.
 
-The six-color world remains deliberately racy: writes are not serialized and last-observed write wins. Read-head occupancy is different: only one ant may own a cell. The initial STM32 implementation protects occupancy claims with 32 striped hardware semaphores (HSEM). A cell hashes to one HSEM stripe, so unrelated cells can still be claimed concurrently.
+## Portable concepts and required changes
 
-## FreeRTOS shape
+The rule catalogue/interpreter, LFSR algorithm, Q16 tokens, WFQ-like credit policy, batching, and population concepts are candidates for sharing. Their present source files are not all platform independent:
 
-The first implementation should use a FreeRTOS instance on each core rather than attempting to emulate a single SMP kernel.
+- Replace direct occupancy atomics with a compile-time backend interface.
+- Split scheduling policy from pthread locks, condition variables, and POSIX time.
+- Supply MCU time and entropy providers instead of host calls.
+- Define shared layout without assuming each image's static rule pointers identify the same data; stable rule indices are already available.
+- Review all atomic operations, especially read-modify-write fields and 64-bit diagnostics, for the selected cross-core protocol and toolchain.
+- Provide explicit storage placement/allocation and boot/reset ownership.
+- Connect the existing portable six-color frame/conversion interface to a driver for the chosen panel, including packing, transfer ownership, and refresh scheduling.
 
-CM7 tasks:
+The core now allocates roughly two bytes per cell for tape and occupancy. Rendering owns separate buffers; no RGB allocation is required by the core. The portable `render_codes()` helper can map a captured frame directly to panel-specific byte codes, without RGB. It does not implement transport or refresh. See [../RENDERING.md](../RENDERING.md). The main Linux application additionally retains a large capture ring. Neither should be copied into firmware without a memory budget. See [../MEMORY_AND_PERF.md](../MEMORY_AND_PERF.md).
 
-- `turmite_worker_task`
-- `turmite_control_task`
-- later: `display_task`
+Before preserving collision behavior in a shared interpreter, resolve the current Linux executor's continuation after failed movement claims, documented in [../SPEC.md](../SPEC.md). A passed host smoke test does not validate the HSEM implementation.
 
-CM4 tasks:
+## Next milestone
 
-- `turmite_worker_task`
-
-Inter-core notification should use HSEM interrupt/notification mechanisms or a very small shared mailbox. OpenAMP is intentionally avoided for the initial port.
-
-## Porting rule
-
-Do not copy Linux synchronization mechanisms mechanically.
-
-Portable concepts:
-
-- rules and rule interpreter
-- Galois LFSR
-- fixed-point tokens
-- WFQ policy and minimum-service batching
-- quantum execution
-- collision health/mutation rules
-- O(1) occupancy index
-
-Platform-specific mechanisms:
-
-- pthread mutex/condvar -> FreeRTOS + HSEM/notifications
-- `clock_gettime()` -> hardware timer / RTOS monotonic time
-- host entropy -> MCU hardware entropy source
-- SDL -> e-paper driver
-- Linux atomics on shared cacheable memory -> explicitly designed STM32 shared-memory protocol
-
-## Next implementation step
-
-The next code change should move occupancy claim/release operations behind a small platform interface. Linux will keep its atomic-CAS implementation; STM32 will use the HSEM-striped implementation in `src/turmite_stm32_shared.c`.
+Choose the board/display requirements, establish memory and shared-state boundaries, then integrate the portable core and occupancy backend. Bring up both workers, counters, and lifecycle through SWD/UART before adding independent display refresh. [INTEGRATION.md](INTEGRATION.md) is a proposed checklist, not a record of completed hardware work.

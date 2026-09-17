@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define TURMITE_COLORS 6
+#include "colors.h"
 #define TURMITE_MAX_STATES 4
 #define TURMITE_MAX_RULES 64
 

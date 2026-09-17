@@ -1,73 +1,12 @@
-#include "renderer.h"
+#include "renderer_sdl.h"
+
+#include <limits.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Linux renderer: generate the colors available to future writes, copy the
- * persistent RGB paper into a streaming SDL texture, and optionally draw a HUD.
- * It never changes the six-color logical tape seen by the ants. */
-
-/* Linux-only display effect: logical color zero is always true black. Colors
- * 1..5 available to future ant writes drift slowly; once RGB is deposited on
- * the visual paper, it stays there until that cell is overwritten. */
-#define PALETTE_DRIFT_SECONDS 240.0
-
-static uint32_t rgb_blend(uint32_t base, uint32_t tint, uint32_t amount)
-{
-    const uint32_t inv = 255u - amount;
-    const uint32_t br = (base >> 16) & 0xffu;
-    const uint32_t bg = (base >> 8) & 0xffu;
-    const uint32_t bb = base & 0xffu;
-    const uint32_t tr = (tint >> 16) & 0xffu;
-    const uint32_t tg = (tint >> 8) & 0xffu;
-    const uint32_t tb = tint & 0xffu;
-
-    const uint32_t r = (br * inv + tr * amount) / 255u;
-    const uint32_t g = (bg * inv + tg * amount) / 255u;
-    const uint32_t b = (bb * inv + tb * amount) / 255u;
-    return (r << 16) | (g << 8) | b;
-}
-
-/* Six-segment RGB color wheel. Each 256-step segment linearly interpolates one
- * primary/secondary transition, avoiding trigonometry for a cosmetic effect. */
-static uint32_t palette_drift_tint(double universe_age)
-{
-    double cycle = universe_age / PALETTE_DRIFT_SECONDS;
-    cycle -= (uint64_t)cycle;
-
-    uint32_t phase = (uint32_t)(cycle * 1536.0); /* 6 * 256 */
-    if (phase >= 1536u) phase = 0;
-    const uint32_t segment = phase >> 8;
-    const uint32_t t = phase & 0xffu;
-    const uint32_t u = 255u - t;
-
-    uint32_t r = 0, g = 0, b = 0;
-    switch (segment) {
-        case 0: r = 255; g = t;   b = 0;   break;
-        case 1: r = u;   g = 255; b = 0;   break;
-        case 2: r = 0;   g = 255; b = t;   break;
-        case 3: r = 0;   g = u;   b = 255; break;
-        case 4: r = t;   g = 0;   b = 255; break;
-        default:r = 255; g = 0;   b = u;   break;
-    }
-    return (r << 16) | (g << 8) | b;
-}
-
-/* Build the six pen colors for this frame. These are only sampled by future
- * ant writes; existing world->ink pixels remain unchanged. */
-static void build_ink_palette(double universe_age, uint32_t out[TURMITE_COLORS])
-{
-    const uint32_t tint = palette_drift_tint(universe_age);
-
-    /* Color zero is the blank paper and the erasing color used by many rules,
-     * so keep it invariant. The remaining colors carry the time-varying ink. */
-    out[0] = TURMITE_DISPLAY_BASE_PALETTE[0];
-    for (size_t i = 1; i < TURMITE_COLORS; ++i) {
-        const uint32_t amount = (i == 1) ? 32u : 72u;
-        out[i] = rgb_blend(TURMITE_DISPLAY_BASE_PALETTE[i], tint, amount);
-    }
-}
+/* SDL transport consumes fixed-palette snapshots prepared by the host. */
 
 /* Compact 5x7 font keeps the HUD dependency-free. Each row is five bits, MSB
  * on the left, and is expanded into filled SDL rectangles when drawn. */
@@ -182,7 +121,15 @@ int renderer_display_size(int display_index, int *width, int *height)
 int renderer_init(Renderer *renderer, int width, int height, int cell_size,
                   bool hud_visible, int display_index, bool fullscreen)
 {
+    if (!renderer) return -1;
     memset(renderer, 0, sizeof(*renderer));
+    if (width <= 0 || height <= 0 || cell_size <= 0 ||
+        width % cell_size || height % cell_size ||
+        width / cell_size > INT_MAX / (int)sizeof(uint32_t)) return -1;
+    const size_t cols = (size_t)(width / cell_size);
+    const size_t rows = (size_t)(height / cell_size);
+    if (cols > SIZE_MAX / rows || cols * rows > SIZE_MAX / sizeof(uint32_t)) return -1;
+    renderer->cells = cols * rows;
     renderer->width = width;
     renderer->height = height;
     renderer->cell_size = cell_size;
@@ -204,26 +151,32 @@ int renderer_init(Renderer *renderer, int width, int height, int cell_size,
     renderer->window = SDL_CreateWindow("Turmite Universe", x, y, width, height, flags);
     if (!renderer->window) {
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
-        return -1;
+        goto fail;
     }
 
     renderer->renderer = SDL_CreateRenderer(renderer->window, -1, SDL_RENDERER_ACCELERATED);
+    if (!renderer->renderer)
+        renderer->renderer = SDL_CreateRenderer(renderer->window, -1, SDL_RENDERER_SOFTWARE);
     if (!renderer->renderer) {
         fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
-        return -1;
+        goto fail;
     }
 
     SDL_SetRenderDrawBlendMode(renderer->renderer, SDL_BLENDMODE_BLEND);
-    renderer->pixels = malloc((size_t)(width / cell_size) * (size_t)(height / cell_size) * sizeof(uint32_t));
-    if (!renderer->pixels) return -1;
+    renderer->pixels = malloc(renderer->cells * sizeof(*renderer->pixels));
+    if (!renderer->pixels) goto fail;
 
     /* renderer->pixels stores packed 0xAARRGGBB words. ARGB8888 matches that
      * integer layout; using RGBA8888 made the 0xFF alpha byte appear as red. */
     renderer->texture = SDL_CreateTexture(renderer->renderer, SDL_PIXELFORMAT_ARGB8888,
         SDL_TEXTUREACCESS_STREAMING, width / cell_size, height / cell_size);
-    if (!renderer->texture) return -1;
+    if (!renderer->texture) goto fail;
     SDL_SetTextureScaleMode(renderer->texture, SDL_ScaleModeNearest);
     return 0;
+
+fail:
+    renderer_destroy(renderer);
+    return -1;
 }
 
 void renderer_destroy(Renderer *renderer)
@@ -237,26 +190,16 @@ void renderer_destroy(Renderer *renderer)
     memset(renderer, 0, sizeof(*renderer));
 }
 
-void renderer_render(Renderer *renderer, World *world, const AntColony *colony,
-                     const Scheduler *scheduler, size_t workers, uint32_t seed, double universe_age,
-                     uint64_t total_collisions, bool paused)
+void renderer_render(Renderer *renderer, const RenderFrame *frame,
+                     const RendererHud *hud)
 {
-    /* Advance the colors available to future writes. This does not touch any
-     * RGB already stored in world->ink, so the existing paper never shifts. */
-    uint32_t ink_palette[TURMITE_COLORS];
-    build_ink_palette(universe_age, ink_palette);
-    world_set_ink_palette(world, ink_palette);
+    if (!renderer || !renderer->texture || !hud || !frame ||
+        frame->width != (size_t)(renderer->width / renderer->cell_size) ||
+        frame->height != (size_t)(renderer->height / renderer->cell_size)) return;
+    if (!render_argb(frame, RENDER_BASE_PALETTE, renderer->pixels, renderer->cells)) return;
 
-    /* Snapshot the persistent ink plane into a conventional packed pixel buffer
-     * before handing it to SDL. The renderer may race with ant writes, which is
-     * acceptable because each pixel observation is independent. */
-    const int n = world->width * world->height;
-    for (int i = 0; i < n; ++i) {
-        const uint32_t rgb = world_ink_load(world, (size_t)i);
-        renderer->pixels[i] = 0xFF000000u | rgb;
-    }
-
-    SDL_UpdateTexture(renderer->texture, NULL, renderer->pixels, world->width * (int)sizeof(uint32_t));
+    SDL_UpdateTexture(renderer->texture, NULL, renderer->pixels,
+                      (int)(frame->width * sizeof(*renderer->pixels)));
     SDL_RenderClear(renderer->renderer);
     SDL_Rect dst = {0, 0, renderer->width, renderer->height};
     SDL_RenderCopy(renderer->renderer, renderer->texture, NULL, &dst);
@@ -267,27 +210,19 @@ void renderer_render(Renderer *renderer, World *world, const AntColony *colony,
         SDL_RenderFillRect(renderer->renderer, &panel);
 
         char line[128];
-        snprintf(line, sizeof(line), "ANTS %zu / 32", atomic_load_explicit(&colony->active_population, memory_order_relaxed));
+        snprintf(line, sizeof(line), "ANTS %zu / 32", hud->population);
         draw_text(renderer->renderer, 24, 22, line, 2);
-        snprintf(line, sizeof(line), "WORKERS %zu  Q %zu  MIN %zu", workers,
-                 scheduler_get_quantum((Scheduler *)scheduler),
-                 scheduler_get_min_service((Scheduler *)scheduler));
+        snprintf(line, sizeof(line), "WORKERS %zu  Q %zu  MIN %zu", hud->workers, hud->quantum, hud->min_service);
         draw_text(renderer->renderer, 24, 42, line, 2);
-        snprintf(line, sizeof(line), "WFQ  AGE %05.1F", universe_age);
+        snprintf(line, sizeof(line), "WFQ  AGE %05.1F", hud->age);
         draw_text(renderer->renderer, 24, 62, line, 2);
-        snprintf(line, sizeof(line), "SEED %08X", seed);
+        snprintf(line, sizeof(line), "SEED %08X", hud->seed);
         draw_text(renderer->renderer, 24, 82, line, 2);
-        snprintf(line, sizeof(line), "COLL %llu", (unsigned long long)total_collisions);
+        snprintf(line, sizeof(line), "COLL %llu", (unsigned long long)hud->collisions);
         draw_text(renderer->renderer, 24, 102, line, 2);
-        draw_text(renderer->renderer, 24, 122, paused ? "PAUSED" : "RUNNING", 2);
+        draw_text(renderer->renderer, 24, 122, hud->paused ? "PAUSED" : "RUNNING", 2);
     }
 
     SDL_RenderPresent(renderer->renderer);
 }
 
-void renderer_handle_resize(Renderer *renderer, int width, int height)
-{
-    (void)renderer;
-    (void)width;
-    (void)height;
-}

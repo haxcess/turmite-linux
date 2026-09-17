@@ -1,50 +1,43 @@
-# Optimization task queue
+# Optimization and porting queue
 
-## Current / measured
+This is the current queue. [OPTIMIZATION_NOTES.md](OPTIMIZATION_NOTES.md) preserves the historical V4/V5/V6 work and its measurements.
 
-1. **Collision lookup hot path**
-   - Baseline profile walked 48-byte `Ant` structs and spent a large fraction of samples loading candidate state.
-   - V4 uses a packed structure-of-arrays occupancy view: 32 atomic `(y<<16)|x` positions = 128 bytes, aligned to a 64-byte cache line boundary, plus a 32-bit enabled mask.
-   - Still O(N) worst-case, but scans only enabled bits with `ctz` and touches only packed positions.
-   - Re-profile before replacing the algorithm.
+## Implemented
 
-2. **WFQ scheduler scan / mutex**
-   - Previous profile showed `scheduler_acquire()` disproportionately hot.
-   - V4 instruments `empty_scans`, `idle_waits`, granted instructions, and average executed instructions/dispatch.
-   - Determine whether cost is successful O(32) scanning, mutex serialization, or token starvation before redesigning.
+- Q16 token balances and per-ant runtime RNG streams.
+- Scheduler-granted instruction batches and worker-local execution state.
+- O(1) collision discovery with one atomic occupancy byte per world cell (V5).
+- Position publication once per quantum rather than once per move (V6).
+- CAS-first empty-destination claim and resident ID retrieval on contention.
+- Configurable minimum-service batching and a universe-wide token-rate divisor.
+- Benchmark counters for grant size, completed work, empty scans, and idle waits.
+- Rendering separated from the simulation: portable six-color snapshots/conversion, fixed-palette SDL output, no RGB ink writes or storage in the core.
 
-## Next candidates
+## Correctness gates before further optimization
 
-3. If packed collision scanning remains hot, evaluate a small spatial hash / bucket bitmask index. Do not add a full per-cell occupancy map unless measurements justify changing that design principle.
-4. Reduce scheduler shared-state traffic / full scans while preserving WFQ semantics.
-5. Separate single-worker throughput limits from two-worker coherency/lock contention.
-6. Revisit world-cell atomics only after collision and scheduler costs are reduced.
+1. Check collision-loser execution: the instruction loop currently ignores a failed movement claim and continues the grant without rechecking clobbered status. Establish the intended behavior and cover it with focused tests.
+2. Check best-effort population controls under leases/collisions, and handle random-placement failure before relying on exact population counts.
+3. Check batching thresholds above bucket capacity and elapsed-time accrual with large slow-motion divisors.
+4. Correct single-page dump change counts if those captures need useful deltas; decide which additional metadata is needed for diagnostics.
 
+The existing smoke test validates final occupancy and unchanged population during a short two-worker run. It does not settle these instruction-level, lifecycle, or embedded synchronization questions.
 
-### Completed in V5
-- Replace O(32) collision scan with O(1) CAS occupancy index.
-- Preserve authoritative ant position separately from the derived occupancy cache.
-- Add displaced-loser reclamation and smoke-test occupancy consistency.
+## STM32 preparation
 
-### Next
-1. Profile V5 saturated and normal token-rate runs against the V4 baseline.
-2. If scheduler dominates normal-rate runs, prototype minimum-service batching without changing long-term token rates.
-3. Revisit world-cell atomic/interpreter costs only after the above.
+1. Select the board and display, then budget tape, occupancy, presentation buffers, stacks, and shared state. H745/H747 dual-core is the existing design proposal. The display target is six-color e-ink, roughly 8×6 inches, with controller and resolution unselected.
+2. Put occupancy operations behind a compile-time platform interface, retaining Linux CAS and connecting the existing 16-stripe HSEM scaffold.
+3. Separate WFQ/token policy from pthread locking, waits, clocks, and notifications.
+4. Integrate the portable rendering interface with the selected panel backend: code mapping, packing, refresh timing, and transfer-buffer ownership. Presentation has already been separated from the core.
+5. Define cross-core state layout and ownership, including rule references, flags, tokens, 64-bit counters, memory placement, and startup. Implement time/entropy providers and firmware builds.
+6. Bring up workers and lifecycle without the display, then add independent display refresh.
 
-## V6 status
+See [stm32/INTEGRATION.md](stm32/INTEGRATION.md) for the proposed integration sequence. The current HSEM helper is not yet a complete synchronization backend.
 
-Completed:
+## Profiling gates
 
-- [x] Replace O(32) collision discovery with O(1) occupancy index (V5).
-- [x] Remove per-move publication to `positions[]`; publish once per dispatch.
-- [x] Trust occupancy ownership on the normal collision path; remove flags/position re-validation.
-- [x] Collapse empty-destination load+claim into a single CAS-first path.
-- [x] Add configurable minimum-service batching without changing long-term token rates.
+1. Rerun unbatched, batched, and saturated benchmarks after removing RGB work from ant instructions. Historical results describe different presentation costs.
+2. Compare one-worker throughput with two-worker contention before changing shared-state traffic.
+3. If scheduler scans or displaced-ant reclamation dominate, evaluate targeted bookkeeping or wakeup changes while retaining token/lease semantics.
+4. Measure tape/occupancy costs in workers and snapshot/conversion costs in rendering separately before optimizing the interpreter.
 
-Next profiling gates:
-
-1. Compare V6 `perf-record-unbatched` vs `perf-record-1w` to isolate batching cost/benefit.
-2. Compare V6 `perf-record-saturated` against V5 saturated to identify the new movement hotspot.
-3. If displaced-ant reclamation remains visible, replace scheduler-wide reclaim polling with an event/list mechanism.
-4. Profile world-cell relaxed atomics.
-5. Only then micro-optimize rule interpretation / turn logic.
+Do not treat smaller host structures or higher saturated throughput as evidence that the firmware port is correct or that the normal visual workload improves.

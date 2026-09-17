@@ -2,40 +2,43 @@
 #define TURMITE_RENDERER_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
-#include <SDL2/SDL.h>
+#include "colors.h"
 
-#include "ant.h"
-#include "scheduler.h"
-#include "world.h"
-
-/* SDL is an observer of the universe, not part of its execution model. The
- * renderer converts the persistent Linux ink plane into a texture and overlays
- * optional development metadata without feeding state back into the ants. */
+/* Caller-owned snapshot: one logical index (0..5) per cell, row-major.
+ * No SDL, RTOS, World, scheduler, allocation, or transport dependency.
+ * colors must contain width*height bytes and stay unchanged while consumed.
+ * Async/DMA backends must retain the snapshot or copy it before returning
+ * control to a producer that will reuse the storage.
+ */
 typedef struct {
-    SDL_Window *window;
-    SDL_Renderer *renderer;
-    SDL_Texture *texture;
-    uint32_t *pixels;
-    int width;
-    int height;
-    int cell_size;
-    int display_index;
-    bool fullscreen;
-    bool hud_visible;
-} Renderer;
+    size_t width;
+    size_t height;
+    const uint8_t *colors;
+} RenderFrame;
 
-/* Query the desktop pixel dimensions of one SDL display. This also performs
- * the minimal SDL video initialization needed before the world is allocated. */
-int renderer_display_size(int display_index, int *width, int *height);
+/* Fixed Linux preview palette. Panel drivers supply their own color mapping. */
+extern const uint32_t RENDER_BASE_PALETTE[TURMITE_COLORS];
 
-int renderer_init(Renderer *renderer, int width, int height, int cell_size,
-                  bool hud_visible, int display_index, bool fullscreen);
-void renderer_destroy(Renderer *renderer);
-void renderer_render(Renderer *renderer, World *world, const AntColony *colony,
-                     const Scheduler *scheduler, size_t workers, uint32_t seed, double universe_age,
-                     uint64_t total_collisions, bool paused);
-void renderer_handle_resize(Renderer *renderer, int width, int height);
+/* Validate dimensions/storage and return the cell count, or zero on error. */
+size_t render_frame_cells(const RenderFrame *frame);
+
+/* Allocation-free conversion into caller-owned buffers. Capacity is in cells.
+ * Invalid indices map to logical zero. Invalid frame/pointers/capacity return
+ * false without changing output. Input, palette and output must not overlap.
+ */
+bool render_argb(const RenderFrame *frame,
+                 const uint32_t palette[TURMITE_COLORS],
+                 uint32_t *pixels, size_t capacity);
+
+/* Map indices to display-specific byte codes. Packing, commands, refresh
+ * scheduling, and DMA/cache ownership belong to the eventual panel backend.
+ * Input, mapping and output must not overlap.
+ */
+bool render_codes(const RenderFrame *frame,
+                  const uint8_t codes[TURMITE_COLORS],
+                  uint8_t *pixels, size_t capacity);
 
 #endif

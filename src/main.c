@@ -1,6 +1,6 @@
 #include "ant.h"
 #include "dump.h"
-#include "renderer.h"
+#include "renderer_sdl.h"
 #include "rng.h"
 #include "rules.h"
 #include "scheduler.h"
@@ -63,6 +63,7 @@ typedef struct {
     AntColony colony;
     Scheduler scheduler;
     Renderer renderer;
+    uint8_t *display_cells;
     DumpCapture dump;
     Lfsr32 rng;
     uint32_t seed;
@@ -176,6 +177,7 @@ static int universe_init(Universe *u, uint32_t seed)
         if (renderer_init(&u->renderer, u->width, u->height, u->cell_size,
                           u->hud_visible, u->display_index, u->fullscreen) != 0) {
             fprintf(stderr, "renderer initialization failed\n");
+            dump_capture_destroy(&u->dump);
             scheduler_destroy(&u->scheduler);
             ant_colony_destroy(&u->colony);
             world_destroy(&u->world);
@@ -183,9 +185,13 @@ static int universe_init(Universe *u, uint32_t seed)
         }
     }
 
+    if (!u->headless) u->display_cells = malloc(u->world.cells);
     u->threads = calloc(u->workers, sizeof(*u->threads));
-    if (!u->threads) {
+    if (!u->threads || (!u->headless && !u->display_cells)) {
+        free(u->display_cells);
+        free(u->threads);
         if (!u->headless) renderer_destroy(&u->renderer);
+        dump_capture_destroy(&u->dump);
         scheduler_destroy(&u->scheduler);
         ant_colony_destroy(&u->colony);
         world_destroy(&u->world);
@@ -198,6 +204,7 @@ static int universe_init(Universe *u, uint32_t seed)
 static void universe_destroy(Universe *u)
 {
     free(u->threads);
+    free(u->display_cells);
     dump_capture_destroy(&u->dump);
     if (!u->headless) renderer_destroy(&u->renderer);
     scheduler_destroy(&u->scheduler);
@@ -386,6 +393,31 @@ static void headless_poll_input(Universe *u)
     }
 }
 
+/* Capture on the host side: rendering never reaches into live ant/scheduler
+ * objects. The cell reads are independent observations, not a frozen world.
+ * The SDL backend consumes this stable snapshot synchronously. */
+static void universe_render(Universe *u, double age, bool paused)
+{
+    for (size_t i = 0; i < u->world.cells; ++i)
+        u->display_cells[i] = world_load(&u->world, i);
+    const RenderFrame frame = {
+        .width = (size_t)u->world.width,
+        .height = (size_t)u->world.height,
+        .colors = u->display_cells
+    };
+    const RendererHud hud = {
+        .population = scheduler_active_population(&u->scheduler),
+        .workers = u->workers,
+        .quantum = scheduler_get_quantum(&u->scheduler),
+        .min_service = scheduler_get_min_service(&u->scheduler),
+        .seed = u->seed,
+        .age = age,
+        .collisions = atomic_load_explicit(&u->colony.collisions, memory_order_relaxed),
+        .paused = paused
+    };
+    renderer_render(&u->renderer, &frame, &hud);
+}
+
 /* Main control/render loop. Workers evolve the universe concurrently while
  * this thread handles input, periodic dump capture, rendering and watchdog-like
  * lifetime restart behavior. Rendering is therefore only an observer. */
@@ -424,9 +456,7 @@ static bool run_universe(Universe *u)
         dump_capture_maybe(&u->dump, &u->world, &u->colony, &u->scheduler, &u->rng, age, now);
 
         if (!u->headless) {
-            uint64_t collisions = atomic_load_explicit(&u->colony.collisions, memory_order_relaxed);
-            renderer_render(&u->renderer, &u->world, &u->colony, &u->scheduler,
-                            u->workers, u->seed, age, collisions, u->paused);
+            universe_render(u, age, u->paused);
 
             next_frame += frame_period;
             double sleep_for = next_frame - mono_seconds();
@@ -465,9 +495,7 @@ static bool run_universe(Universe *u)
             while (SDL_PollEvent(&ev)) {
                 if (ev.type == SDL_QUIT) atomic_store_explicit(&u->quit, true, memory_order_release);
             }
-            renderer_render(&u->renderer, &u->world, &u->colony, &u->scheduler,
-                            u->workers, u->seed, mono_seconds() - u->started_at,
-                            atomic_load_explicit(&u->colony.collisions, memory_order_relaxed), true);
+            universe_render(u, mono_seconds() - u->started_at, true);
             SDL_Delay(16);
         }
     }

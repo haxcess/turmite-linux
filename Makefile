@@ -12,12 +12,13 @@ SRC := \
   src/scheduler.c \
   src/ant.c \
   src/dump.c \
+  src/renderer.c \
   src/renderer_sdl.c
 
 OBJ := $(SRC:.c=.o)
 TARGET := turmite
 
-.PHONY: all clean core-test tsan-test struct-report bench perf-stat perf-stat-unbatched perf-stat-1w perf-stat-saturated perf-record perf-record-unbatched perf-record-1w perf-record-saturated perf-report
+.PHONY: all clean render-test sdl-test core-test tsan-test struct-report bench perf-stat perf-stat-unbatched perf-stat-1w perf-stat-saturated perf-record perf-record-unbatched perf-record-1w perf-record-saturated perf-report
 
 all: $(TARGET)
 
@@ -64,7 +65,7 @@ tests/bench: tests/bench.c src/rng.c src/rules.c src/world.c src/ant.c src/sched
 	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $^ -pthread -lm -o $@
 
 clean:
-	rm -f $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench
+	rm -f $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench tests/render_test tests/renderer_sdl_test
 
 core-test: tests/headless_smoke
 	./tests/headless_smoke
@@ -83,3 +84,16 @@ struct-report: tests/struct_sizes
 
 tests/struct_sizes: tests/struct_sizes.c src/rules.c src/rules.h
 	$(CC) -O2 -std=c17 -I src tests/struct_sizes.c src/rules.c -o $@
+
+# Portable rendering has no SDL or pthread dependency.
+render-test: tests/render_test
+	./tests/render_test
+
+tests/render_test: tests/render_test.c src/renderer.c src/renderer.h src/colors.h src/world.c src/world.h
+	$(CC) $(CFLAGS) -I src tests/render_test.c src/renderer.c src/world.c -o $@
+
+sdl-test: tests/renderer_sdl_test
+	SDL_VIDEODRIVER=dummy ./tests/renderer_sdl_test
+
+tests/renderer_sdl_test: tests/renderer_sdl_test.c src/renderer.c src/renderer_sdl.c src/renderer.h src/renderer_sdl.h src/colors.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I src tests/renderer_sdl_test.c src/renderer.c src/renderer_sdl.c $(shell pkg-config --libs sdl2) -o $@
