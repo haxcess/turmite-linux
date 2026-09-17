@@ -1,7 +1,7 @@
 turmite
+turmite.exe
 src/*.o
 src/*.d
-turmite-dumps/
 
 # Rule-lab build and test products
 /tools/export_rule_catalog
@@ -11,3 +11,7 @@ turmite-dumps/
 /tests/rule-traces.js
 /tests/generated_rules_check.c
 /tests/generated_rules_check
+
+# working folders
+/patches/
+/turmite-dumps/
