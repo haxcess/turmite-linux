@@ -4,7 +4,11 @@ Standalone screensaver (`DreamService`) and phone/TV preview launcher. Package: 
 
 ## Build
 
-Install JDK 17, Gradle 8.11.1, and Android SDK command-line tools or Android Studio. Set `JAVA_HOME`, add Gradle to `PATH`, and set `ANDROID_HOME` (or `sdk.dir` in `android/local.properties`). No Gradle wrapper is bundled in this initial scaffold.
+Recommended: [Docker build](ANDROID_DOCKER.md), with no host toolchain installation.
+
+### Local toolchain
+
+Install JDK 17 or 21, Gradle 8.11.1, and Android SDK command-line tools or Android Studio. Set `JAVA_HOME`, add Gradle to `PATH`, and set `ANDROID_HOME` (or `sdk.dir` in `android/local.properties`). No Gradle wrapper is bundled in this initial scaffold.
 
 ```sh
 sdkmanager --licenses
@@ -17,6 +21,20 @@ AGP 8.9.2; compile/target SDK 35. Initial builds download Gradle plugin dependen
 
 Launch **Turmite Universe** → **Preview**, or **Screensaver settings** → select **Turmite Universe**. Settings availability and idle/charging activation depend on device firmware; verify on the Bravia and phone. The app does not change the selected saver automatically. Dream input exits normally; preview exits with Back.
 
+## Settings
+
+Open **Configure Turmite** in the launcher or the screensaver settings button exposed by Android.
+
+| Slider | Range / step | Default |
+| --- | --- | --- |
+| Ants | 2–8 / 1 | 8 |
+| Universe lifetime | 0.1–5 minutes / 0.1 | 5 |
+| Token-rate divisor | 1–100 / 1 | 1 |
+
+Values persist automatically and apply on the next preview/dream start. Touch or TV D-pad adjusts sliders; Up/Down moves focus, Left/Right changes one step. Larger divisor slows refill. Lifetime triggers reseeding, not app exit. Android runs one universe per active preview/dream, without Q dumps, monitor enumeration, CLI, or HUD. CMake excludes Linux `main.c`, `dump.c`, and `renderer_sdl.c`.
+
+Fedora installation: [build environment](ANDROID_FEDORA.md).
+
 ## Shared sources
 
 `android/app/src/main/cpp/CMakeLists.txt` compiles repository `src/{ant,rules,rng,world,scheduler,renderer}.c` directly. Edit `src/rules.c`, then rebuild Linux with `make` and Android with `sh android/build.sh`. Each binary embeds the catalogue at build time. No generated Android catalogue or copied simulator.
@@ -28,7 +46,7 @@ Launch **Turmite Universe** → **Preview**, or **Screensaver settings** → sel
 | `engine.c` | World, colony, scheduler, two pthread workers |
 | Shared C sources | Rules, mutations, scheduling, logical tape, palette |
 
-Android defaults: 8 ants, quantum 64, minimum service 16, divisor 1, five-minute reseeding, ~30 FPS. These host settings are independent of Linux CLI defaults. Canvas preserves aspect ratio, caps longest side at 960 cells, and scales with nearest-neighbor sampling. No HUD or settings editor yet.
+Android defaults: 8 ants, quantum 64, minimum service 16, divisor 1, five-minute reseeding, ~30 FPS. These host settings are independent of Linux CLI defaults. Canvas preserves aspect ratio, caps longest side at 960 cells, and scales with nearest-neighbor sampling. Settings apply to both preview and screensaver.
 
 Lifecycle stop/surface destruction interrupts and joins the frame thread; native destruction stops the scheduler and joins ant workers before releasing state. Resize creates a fresh universe. Native state is 64-byte aligned for `AntColony`. Frame samples remain non-transactional. Bitmap/JNI copies are an initial backend; profile on hardware before increasing resolution.
 
@@ -42,7 +60,7 @@ cmake --build /tmp/turmite-android-host
 ctest --test-dir /tmp/turmite-android-host --output-on-failure
 ```
 
-Coverage: repeated create/render/destroy, worker progress, shared palette, invalid bounds. Android build/lint: `sh android/build.sh assembleDebug lintDebug`.
+Coverage: repeated create/render/destroy, worker progress, shared palette, all ant counts 2–8, divisor endpoints, invalid settings/bounds. Android build/lint: `sh android/build.sh assembleDebug lintDebug`.
 
 Device checks: phone/TV launcher, D-pad navigation, system dream preview, normal idle activation, input exit, repeated start/stop, orientation/surface recreation, worker shutdown, sustained temperature/CPU use. Verify ARM32/ARM64 and 16 KB page-size compatibility. No device or APK validation has been performed for this scaffold.
 

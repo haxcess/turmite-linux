@@ -2,10 +2,10 @@
 #include <jni.h>
 
 JNIEXPORT jlong JNICALL Java_org_haxcess_turmite_NativeEngine_create(
-    JNIEnv *env, jclass type, jint width, jint height)
+    JNIEnv *env, jclass type, jint width, jint height, jint ants, jint divisor)
 {
     (void)env; (void)type;
-    return (jlong)(intptr_t)android_engine_create(width, height, 0);
+    return (jlong)(intptr_t)android_engine_create(width, height, 0, ants, divisor);
 }
 
 JNIEXPORT jboolean JNICALL Java_org_haxcess_turmite_NativeEngine_frame(

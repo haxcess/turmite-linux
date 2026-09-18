@@ -14,6 +14,7 @@ Commands and source paths are relative to the repository root.
 | [Memory and performance](MEMORY_AND_PERF.md) | Storage, benchmarks, profiling |
 | [Experiments](EXPERIMENTS.md) | Comparison commands and manual checks |
 | [Optimization queue](OPTIMIZATION_QUEUE.md) | Pending work |
+| [Docker build](ANDROID_DOCKER.md) | Containerized Android toolchain |
 | [Android](ANDROID.md) | APK build, screensaver, JNI host |
 | [STM32](stm32/README.md) | Scaffold and proposed architecture |
 | [STM32 integration](stm32/INTEGRATION.md) | Bring-up checklist |

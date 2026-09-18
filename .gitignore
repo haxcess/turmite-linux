@@ -1,5 +1,5 @@
-turmite
-turmite.exe
+/turmite
+/turmite.exe
 src/*.o
 src/*.d
 
@@ -28,3 +28,4 @@ src/*.d
 /android/app/.cxx/
 /android/*.jks
 /android/*.keystore
+/android/.docker-cache/

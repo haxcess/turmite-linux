@@ -6,7 +6,7 @@
 #include <string.h>
 #include <time.h>
 
-enum { WORKERS = 2, INITIAL_ANTS = 8, QUANTUM = 64, MIN_SERVICE = 16, MAX_SIDE = 960 };
+enum { WORKERS = 2, QUANTUM = 64, MIN_SERVICE = 16, MAX_SIDE = 960 };
 
 struct AndroidEngine {
     World world;
@@ -38,9 +38,10 @@ static void *worker(void *arg)
     }
 }
 
-AndroidEngine *android_engine_create(int width, int height, uint32_t seed)
+AndroidEngine *android_engine_create(int width, int height, uint32_t seed, int ants, int divisor)
 {
     if (width < 16 || height < 16 || width > MAX_SIDE || height > MAX_SIDE) return NULL;
+    if (ants < 2 || ants > 8 || divisor < 1 || divisor > 100) return NULL;
     // AntColony contains an alignas(64) member; plain malloc need not satisfy it.
     AndroidEngine *engine = NULL;
     if (posix_memalign((void **)&engine, _Alignof(AndroidEngine), sizeof(*engine)) != 0) return NULL;
@@ -49,14 +50,15 @@ AndroidEngine *android_engine_create(int width, int height, uint32_t seed)
     if (ant_colony_init(&engine->colony, &engine->world) != 0) goto fail;
     engine->colony_ready = true;
     rng_seed(&engine->rng, seed ? seed : rng_entropy_seed());
-    for (size_t i = 0; i < INITIAL_ANTS; ++i) {
+    for (size_t i = 0; i < (size_t)ants; ++i) {
         const TurmiteRule *rule = rules_get(rng_uniform(&engine->rng, (uint32_t)rules_count()));
         ant_randomize(&engine->colony.ants[i], &engine->colony, &engine->world, &engine->rng, rule);
     }
-    atomic_store(&engine->colony.active_population, INITIAL_ANTS);
+    atomic_store(&engine->colony.active_population, (size_t)ants);
     if (scheduler_init(&engine->scheduler, &engine->colony, SCHED_WFQ, QUANTUM) != 0) goto fail;
     engine->scheduler_ready = true;
     scheduler_set_min_service(&engine->scheduler, MIN_SERVICE);
+    scheduler_set_token_rate_divisor(&engine->scheduler, (uint32_t)divisor);
     engine->snapshot = malloc(engine->world.cells);
     if (!engine->snapshot) goto fail;
     for (size_t i = 0; i < WORKERS; ++i) {
@@ -76,6 +78,16 @@ bool android_engine_frame(AndroidEngine *engine, uint32_t *argb, size_t capacity
         engine->snapshot[i] = world_load(&engine->world, i);
     RenderFrame frame = { (size_t)engine->world.width, (size_t)engine->world.height, engine->snapshot };
     return render_argb(&frame, RENDER_BASE_PALETTE, argb, capacity);
+}
+
+size_t android_engine_population(const AndroidEngine *engine)
+{
+    return engine ? scheduler_active_population(&engine->scheduler) : 0;
+}
+
+uint32_t android_engine_divisor(const AndroidEngine *engine)
+{
+    return engine ? scheduler_get_token_rate_divisor(&engine->scheduler) : 0;
 }
 
 uint64_t android_engine_instructions(const AndroidEngine *engine)
