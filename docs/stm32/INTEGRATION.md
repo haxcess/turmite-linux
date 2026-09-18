@@ -1,86 +1,46 @@
-# Proposed STM32H745/H747 integration
+# STM32 integration checklist
 
-This checklist describes work still to do for the existing dual-core proposal. There is no Cube project, board configuration, linker script, implemented worker task, or hardware validation in this repository. Revisit the plan if a different STM32 is chosen.
+Pending H745/H747 design; no Cube projects, linker scripts, worker tasks, or hardware validation.
 
-## 1. Select hardware and budget memory
+## Hardware and memory
 
-Record the board/part, available shared and external RAM, display controller/interface, resolution, color encoding, and refresh requirements. The target is six-color e-ink, approximately 8×6 inches; physical dimensions do not yet establish a pixel count. Linux now uses a fixed six-color preview, with no historical RGB ink.
+- Select part/board, shared/external RAM, panel/controller, resolution, encoding, interface, refresh timing.
+- Budget tape + occupancy at two bytes/cell, private rule tables, scheduler state, stacks, and diagnostics.
+- Choose panel buffers independently of Linux RGB/capture storage. `render_codes()` supplies byte mapping; packing/transport remain backend work.
 
-Budget logical tape and occupancy at one byte per cell each, plus any chosen display buffers, core-private stacks, scheduler/ant state, and diagnostics. The core contains no RGB storage. Choose panel buffers independently: portable `render_codes()` can map indices to byte codes, while packing and hardware transfer remain backend responsibilities. Do not assume the Linux default 127-page capture ring fits on the MCU.
+## Platform boundaries
 
-## 2. Refactor the source boundaries
+- Split token/credit policy from pthread locks, waits, clocks, and notifications.
+- Add compile-time Linux CAS / STM32 HSEM occupancy backends.
+- Define ownership for flags, leases, health, positions, RNG, counters, and reset state; audit atomic widths with the selected toolchain.
+- Use cross-image catalogue IDs and explicit runtime-table storage. Sentinel 65535 does not identify a table. Deep-copy clone tables; publish mutations only after lease release.
+- Port instruction-boundary collision stop, 50 ms recovery, retained-cell waiting, and HALT precedence from [SPEC](../SPEC.md).
 
-Separate portable scheduling/token policy from Linux locking, waits, clocks, and notifications. Add a compile-time occupancy interface for Linux CAS and STM32 HSEM without a hot-path function-pointer requirement. Presentation is already outside the core: `RenderFrame` carries a stable snapshot of logical indices, and the portable conversion functions have no SDL/RTOS dependencies. Move host entropy behind a platform provider. See [../RENDERING.md](../RENDERING.md) for the rendering boundary.
+## Firmware and HSEM
 
-Define ownership and synchronization for every shared field, including flags, leases, token health, positions, RNG state, counters, and reset state. Current `_Atomic` fields and pthread objects cannot simply be copied into a shared linker section as a complete protocol. Audit atomic widths and operations with the selected toolchain.
+Create CM7/CM4 HAL/startup projects, each with FreeRTOS and one worker. CM7 owns control/lifecycle and display. Implement port-header time, entropy, notify, and wait APIs. Waits must permit token-driven progress without external notifications.
 
-Use a defined cross-image representation for rule references. A Linux `Ant` points to either a static catalogue rule or a private runtime table. Separately linked CM7/CM4 images must not assume those pointers are interchangeable. Catalogue indices can identify built-in rules, but runtime index 65535 is only a sentinel; runtime tables require explicit shared storage and ownership.
+| HSEM | Proposed use |
+| --- | --- |
+| 0–15 | Occupancy stripes; existing helper |
+| 16 | Scheduler/control lock |
+| 17 | CM7 → CM4 work notification |
+| 18 | CM4 → CM7 completion |
+| 19 | Reset notification |
+| 20–31 | Reserved |
 
-Port the Linux instruction-boundary collision stop, 50 ms recovery, and lease-protected rule mutation. Validate population-pressure behavior and retained-cell recovery in the embedded scheduler. See [../SPEC.md](../SPEC.md).
+Reconcile boot/peripheral reservations; configure clocks, interrupts, notifications. Keep tape writes outside occupancy critical sections. Define local task/interrupt exclusion; the current yielding helper is not a general scheduler or interrupt-safe lock.
 
-## 3. Create the firmware projects
+## Shared SRAM and boot
 
-Generate separate CM7 and CM4 applications with the appropriate Cube HAL/startup support and a FreeRTOS instance on each core. Add a worker task per core; CM7 also owns control/lifecycle and later display refresh. Supply build configuration for the shared core and the selected platform backend.
+Both linker scripts must reserve the same `.turmite_shared` region/layout/alignment. Supply storage; prevent CM4 startup clearing CM7-initialized data. Configure CM7 MPU before shared access/releasing CM4. Define display DMA placement/cache ownership separately.
 
-Implement the declared time, entropy, notify, and wait functions in `turmite_stm32_port.h`. A work wait must allow token-driven progress when no external notification arrives; work can become eligible solely through elapsed time.
+CM7 sequence: clocks/MPU → shared initialization → seed/scheduler → signal readiness → tasks. CM4 waits for readiness. Quiesce both cores before reset/reinitialization. Hardware watchdog lifecycle remains undecided.
 
-## 4. Assign HSEM and notification ownership
+## Time and entropy
 
-Proposed allocation:
+Seed each universe from MCU entropy; use runtime LFSRs thereafter. Both cores require comparable monotonic `uint64_t` microseconds. Extend a 32-bit timer across wrap: at 1 MHz it wraps in ~71.6 minutes. Universe resets do not imply timer resets; the host `now_us <= last_us` check is not wrap-safe for raw 32-bit time.
 
-| HSEM | Purpose | Status |
-| --- | --- | --- |
-| 0..15 | Occupancy stripes | Used by the unintegrated helper |
-| 16 | Scheduler/control lock | Planned |
-| 17 | CM7 → CM4 work notification | Planned |
-| 18 | CM4 → CM7 completion notification | Planned |
-| 19 | Lifecycle/reset notification | Planned |
-| 20..31 | Reserved | Unassigned |
+## Bring-up checks
 
-Reconcile this allocation with generated boot synchronization and other peripherals before use. Enable the required peripheral clocks, interrupts, and notification handling in the board project.
-
-Occupancy critical sections protect one byte. Keep tape writes outside those sections to preserve independent world updates. Define which local tasks/interrupts can enter HSEM-protected paths and how local exclusion works; the current helper only takes/releases HSEM and yields on contention. It is not an interrupt-safe or general-purpose scheduler lock implementation.
-
-## 5. Reserve and initialize shared SRAM
-
-Both linker scripts must reserve the same physical region with an agreed layout, size, and alignment for `.turmite_shared`. Configure the CM7 MPU attributes before accessing that region with caching enabled or releasing CM4. Provide actual shared arrays/objects; the current header supplies only an attribute.
-
-Shared objects include tape, occupancy, and the portions of ant/scheduler/control state needed by both cores. Keep private execution state and stacks outside the shared region. If display DMA is used, define its memory placement and cache/ownership protocol separately.
-
-Arrange startup so CM4 initialization cannot clear state after CM7 has initialized it. Cross-image linker placement and startup clearing must be designed together, not inferred from matching section names.
-
-## 6. Establish boot and reset ownership
-
-The proposed CM7 sequence is:
-
-1. Initialize clocks/peripherals and configure memory attributes.
-2. Initialize shared world, occupancy, and control state.
-3. Obtain seed entropy and initialize the universe/scheduler.
-4. Signal that shared state is ready for CM4.
-5. Start worker/control tasks under the agreed boot protocol.
-
-CM4 must wait for readiness before touching Turmite state. Define how both cores stop/quiesce before shared-state reinitialization. Linux currently restarts in software; a genuine watchdog/reset lifecycle remains a hardware design and implementation task, including how to achieve the desired five-minute lifetime.
-
-## 7. Provide a common timebase and entropy
-
-Seed once per new universe from the selected MCU entropy source, then use the existing LFSR algorithms for runtime variation. Explicit seeds can help reproduce initialization, but core timing still permits divergent execution.
-
-The declared time API returns monotonic `uint64_t` microseconds. Both workers' timestamps must be comparable if they update one shared scheduler. If implemented with a 32-bit timer, account for wrap and extend it or change the accounting contract deliberately. A 1 MHz 32-bit counter wraps after about 71.6 minutes; repeated five-minute universes alone do not ensure the hardware timer resets. The Linux scheduler's current `now_us <= last_us` check is not wrap-safe for a raw wrapping counter.
-
-## 8. Validate without the display
-
-First establish through SWD/UART that:
-
-- both workers execute against the same tape and agreed rule catalogue;
-- leases prevent simultaneous execution of one ant;
-- occupancy and collision/mutation behavior match the chosen contract;
-- counters and token accrual remain valid across cores and time boundaries;
-- both cores obey initialization, stop, and restart ownership;
-- the intended lifecycle can restart safely.
-
-Then add the display as an independently scheduled observer. Its refresh cadence, snapshot strategy, conversion buffers, and transport/DMA behavior should follow the selected display requirements. The simulation must not assume a 60 Hz SDL loop or an e-paper refresh cycle.
-
-
-## Runtime rule ownership
-
-Linux now has a private 4-state × 6-color rule slot per ant, separate from its hot metadata. Collision recovery waits 50 ms, changes one action field without changing the ant's other phenotype, then waits for retained-cell residency. HALT instead generates a fresh rule/phenotype with complexity biased toward smaller dimensions. Both operations require the ant's worker lease to be released; cloned variants copy tables, not pointers. Port the timer and table-publication protocol explicitly. Raw host rule pointers are not cross-image rule identifiers, and the added rule storage must be included in the SRAM budget. See the Linux specification and mutation tests for the chosen semantics; the existing occupancy HSEM helper does not implement this lifecycle.
+Via SWD/UART, verify shared tape/catalogue, exclusive leases, occupancy, mutation/HALT recovery, population changes, token accounting, timer wrap, and coordinated boot/stop/restart. Then add independently scheduled capture/refresh with explicit DMA buffer ownership.

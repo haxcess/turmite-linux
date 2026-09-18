@@ -280,7 +280,7 @@ typedef struct {
 
 static const OptionHelp option_help[] = {
     {'s', "seed",               "HEX",  "deterministic universe seed"},
-    {'a', "ants",                "N",   "2,4,8,16,32"},
+    {'a', "ants",                "N",   "2-32"},
     {'q', "quantum",             "N",   "maximum instructions per dispatch (1..4096)"},
     {'b', "min-service",         "N",   "minimum normal dispatch batch (default 16)"},
     {'v', "token-rate-divisor",  "N",   "divide all ant token generation rates (default 1)"},
@@ -317,7 +317,7 @@ static void usage(const char *prog)
 
 static bool valid_population(size_t n)
 {
-    return n == 2 || n == 4 || n == 8 || n == 16 || n == 32;
+    return n >= 2 && n <= 32;
 }
 
 static void choose_new_seed(Universe *u)
@@ -658,7 +658,7 @@ int main(int argc, char **argv)
         if (c == -1) break;
         switch (c) {
             case 's': if (!parse_seed(optarg, &explicit_seed)) { fprintf(stderr, "bad --seed\n"); return 2; } has_seed = true; break;
-            case 'a': if (!parse_uint(optarg, &ants) || !valid_population(ants)) { fprintf(stderr, "--ants must be 2,4,8,16,32\n"); return 2; } break;
+            case 'a': if (!parse_uint(optarg, &ants) || !valid_population(ants)) { fprintf(stderr, "--ants must be 2-32\n"); return 2; } break;
             case 'q': if (!parse_uint(optarg, &quantum) || quantum < MIN_QUANTUM || quantum > MAX_QUANTUM) { fprintf(stderr, "bad --quantum\n"); return 2; } break;
             case 'b': if (!parse_uint(optarg, &min_service) || min_service < 1 || min_service > MAX_QUANTUM) { fprintf(stderr, "bad --min-service\n"); return 2; } break;
             case 'v': if (!parse_uint(optarg, &token_rate_divisor) || token_rate_divisor > UINT32_MAX) { fprintf(stderr, "bad --token-rate-divisor\n"); return 2; } break;

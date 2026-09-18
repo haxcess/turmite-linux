@@ -1,10 +1,8 @@
-# Running Turmite Universe
+# Running
 
-Run commands from the repository root; source paths below are relative to that root.
+## Build
 
-## Build and run
-
-Dependencies include a C17 compiler, make, pkg-config, pthreads, and SDL2 development files. On Debian/Ubuntu-style systems:
+Dependencies: C17 compiler, make, pkg-config, pthreads, SDL2 development files. Debian/Ubuntu:
 
 ```sh
 sudo apt install build-essential pkg-config libsdl2-dev
@@ -12,61 +10,56 @@ make
 ./turmite
 ```
 
-By default, Linux opens one normal window on display 0 with the HUD hidden. Use `-u`/`--hud` to show it, `-F`/`--fullscreen` for fullscreen on the selected display, or `-A`/`--fullscreen-all` for independent fullscreen universes on every monitor detected at startup. `-p N`/`--display N` selects the monitor for single-window modes (default 0). Monitor hotplug is not handled during a run.
+## Options
 
-Windowed and headless modes run one universe, default to 1200×800, and accept explicit dimensions. Fullscreen uses each selected monitor's reported dimensions. The last mode flag (`-W`, `-F`, or `-A`) wins; `--display` does not restrict `--fullscreen-all`. The last HUD flag (`-u` or `-n`) wins:
+| Option | Default / range |
+| --- | --- |
+| `-s`, `--seed HEX` | Host entropy; explicit seed controls initialization |
+| `-a`, `--ants N` | 3; integers 2–32 |
+| `-q`, `--quantum N` | 30; 2–4096 |
+| `-b`, `--min-service N` | 16; 1–4096 |
+| `-v`, `--token-rate-divisor N` | 1; positive 32-bit divisor |
+| `-w`, `--workers N` | 2 per universe; 1–8 |
+| `-p`, `--display N` | 0; single-window display index |
+| `-W`, `--windowed` | Default: one normal window |
+| `-F`, `--fullscreen` | Fullscreen on selected display |
+| `-A`, `--fullscreen-all` | Independent fullscreen universe per detected monitor |
+| `-x`, `--width N`; `-y`, `--height N` | 1200 × 800; windowed/headless |
+| `-m`, `--minutes N` | 0.4 (24 seconds); positive restart interval |
+| `-u`, `--hud`; `-n`, `--no-hud` | Show/hide HUD; hidden by default |
+| `-H`, `--headless` | One universe without SDL video initialization |
+| `-d`, `--dump-pages N` | 127; 1, 3, 7, …, 1023 |
+| `-i`, `--dump-interval N` | 1 second; positive |
+| `-D`, `--dump-dir PATH` | `./turmite-dumps` |
+| `-h`, `--help` | Print help |
+
+Values above follow source defaults and validation; current help text still lists older population, quantum, and lifetime values.
+
+Last mode (`-W`/`-F`/`-A`) and HUD flag win. `-A` ignores `-p`. Fullscreen uses monitor dimensions; application minimum is 160 × 120. Monitor discovery occurs at startup; no hotplug. Wayland controls normal-window placement.
 
 ```sh
-./turmite --hud --width 1200 --height 800
-./turmite --fullscreen
-./turmite --fullscreen-all
-./turmite --display 1 --ants 16 --quantum 64 --seed 0x12345678
-./turmite --windowed --token-rate-divisor 100 --min-service 32
+./turmite -F -p 1 -u
+./turmite --ants 4 --workers 4 --quantum 790 --min-service 1000
 ./turmite --headless --width 300 --height 200 --dump-pages 7
-./turmite --help
 ```
 
-Each universe defaults to 8 ants, 2 ant workers, quantum 32, minimum service 16, and token-rate divisor 1. It accepts 1..8 workers and quantum/minimum-service values of 1..4096. A minimum service of 1 reproduces unbatched scheduling. `--minutes` changes the restart interval; it does not make the process exit after that duration.
+## Controls
 
-## Runtime controls
-
-These controls apply only to the focused window and its universe:
+Keys affect the focused universe.
 
 | Key | Action |
 | --- | --- |
-| `SPACE` | Pause/resume dispatch |
+| Space | Pause/resume dispatch |
 | `[` / `]` | Decrease/increase quantum |
-| `-` | Request halving through token-drain retirement |
-| `+` or `=` | Request doubling, up to 32 ants |
-| `R` | Start a fresh universe with a new seed |
-| `H` | Toggle the developer HUD |
-| `Q` | Stop this universe, capture a final page, write its dump, and close its window |
-| `ESC` | Close this window without a dump |
+| `-` | Request population halving through token drain |
+| `+` / `=` | Request doubling, capped at 32 |
+| R | Clear and reseed |
+| H | Toggle HUD |
+| Q | Stop workers, capture final page, write dump, close window |
+| Esc / window close | Close without dump |
 
-Closing a window leaves the other universes running; the process exits after the last window closes. An SDL application-wide quit stops all universes. Use `--hud` to start with the HUD; `--no-hud` explicitly restores the default hidden state. Headless input supports only `Q`/`q` followed by Enter for dump-and-quit. Pause does not freeze the lifecycle timer or capture schedule, and an already leased quantum can finish. Restart restores the original configured quantum and population.
+Headless: `Q`/`q` then Enter dumps and exits. Closing one window leaves others running; last close exits. SDL application quit closes all.
 
-## Command-line reference
+Pause permits outstanding grants to finish; lifecycle and capture continue. Restart restores configured population/quantum and uses fresh entropy. `--minutes` restarts universes; it does not terminate the process.
 
-| Option | Meaning / default |
-| --- | --- |
-| `--seed HEX` | Initial seed; concurrent timing can still change the result |
-| `--ants N` | Initial population: 2, 4, 8, 16, or 32; default 8 |
-| `--workers N` | Ant workers per universe: 1–8; default 2 |
-| `--quantum N` | Maximum grant: 1–4096; default 32 |
-| `--min-service N` | Minimum batch target: 1–4096; default 16 |
-| `-v N`, `--token-rate-divisor N` | Token refill divisor; default 1 |
-| `-p N`, `--display N` | Single-window display index; default 0 |
-| `-W`, `--windowed` | Normal single window; default mode |
-| `-F`, `--fullscreen` | Fullscreen on the selected display |
-| `-A`, `--fullscreen-all` | Independent fullscreen universe on every detected monitor |
-| `--width N`, `--height N` | Windowed/headless dimensions; default 1200 × 800 |
-| `--minutes N` | Universe restart interval; default 5 minutes |
-| `-u`, `--hud` | Show HUD |
-| `-n`, `--no-hud` | Hide HUD; default |
-| `--headless` | Run one universe without initializing SDL video |
-| `--dump-pages N` | Capture-ring capacity; default 127 |
-| `--dump-interval N` | Seconds between captures; default 1 |
-| `--dump-dir PATH` | Dump output directory; default `./turmite-dumps` |
-| `--help` | Show command-line help |
-
-On Wayland, the compositor controls normal-window placement. Fullscreen requests explicitly select a monitor. See [rendering](RENDERING.md) for monitor handling and [debugging](DEBUGGING.md) for capture options and memory costs.
+[Behavior](SPEC.md) · [Dumps](DEBUGGING.md)

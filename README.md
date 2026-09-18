@@ -1,39 +1,28 @@
 # Turmite Universe
 
-An academic art piece and an experiment in multithreading, evolution, and cellular automata. Concurrent turmites paint a shared six-color canvas: simple local rules meet thread timing, competition, and mutation to produce changing patterns.
+An academic art piece exploring multithreading, evolution, and cellular automata. Concurrent turmites draw on a shared six-color canvas. The implementation combines weighted scheduling, collision-driven rule mutation, batched execution, and constant-time collision lookup. Simulation runs independently of display refresh.
 
-The project's technical contributions are an experimental implementation of asynchronous, shared-world cellular automata: fair scheduling across worker threads, local rule evolution through collisions and HALT rebirth, and fast simulation through batched execution and constant-time collision lookup. Simulation runs independently of display refresh, letting computational activity shape the artwork at its own pace.
-
-## Build and run
+## Run
 
 Requires a C17 compiler, make, pkg-config, pthreads, and SDL2 development files.
 
 ```sh
 make
 ./turmite
-```
-
-The default is one 1200 × 800 window on display 0, with the HUD hidden.
-
-```sh
-./turmite --fullscreen
 ./turmite --fullscreen-all
-./turmite --ants 4 --workers 4 --quantum 790 --min-service 1000
 ./turmite --help
 ```
 
-| Option | Purpose |
+Default: one 1200 × 800 window on display 0, HUD hidden. **Esc** closes a window.
+
+| Option | Function |
 | --- | --- |
-| `-W`, `--windowed` | Normal window (default) |
-| `-p N`, `--display N` | Select display for a single window |
-| `-F`, `--fullscreen` | Fullscreen on the selected display |
-| `-A`, `--fullscreen-all` | Independent fullscreen universe on every monitor |
-| `-u`, `--hud` | Show the HUD |
-| `--ants N`, `--workers N` | Set population and worker threads per universe |
-| `--quantum N`, `--min-service N` | Tune execution batches |
-| `-v N`, `--token-rate-divisor N` | Slow token refill by a divisor |
-| `--minutes N` | Restart each universe after N minutes (default 5) |
+| `-W`, `-F`, `-A` | Windowed, selected-display fullscreen, all-display fullscreen |
+| `-p N` | Select display for single-window modes |
+| `-u` | Show HUD |
+| `--ants N`, `--workers N` | Population and workers per universe |
+| `--quantum N`, `--min-service N` | Execution batch limits |
+| `-v N` | Token refill divisor |
+| `--minutes N` | Universe restart interval |
 
-Press **Esc** to close a window. See [running and controls](docs/RUNNING.md) for all options.
-
-The [documentation](docs/README.md) covers behavior, architecture, tests, debugging, performance, and the planned STM32 port. The offline [rule lab](rule-lab.html) lets you create and test individual rules; see its [guide](docs/RULE_LAB.md).
+[Options and controls](docs/RUNNING.md) · [Technical documentation](docs/README.md) · [Rule lab](rule-lab.html) ([guide](docs/RULE_LAB.md))
