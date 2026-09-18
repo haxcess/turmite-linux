@@ -18,3 +18,13 @@ src/*.d
 /tests/mutation_test
 /tests/mutation_stress
 /tests/mutation_stress_tsan
+
+# Android local configuration and build products
+/android/.gradle/
+/android/.idea/
+/android/local.properties
+/android/build/
+/android/app/build/
+/android/app/.cxx/
+/android/*.jks
+/android/*.keystore

@@ -1,0 +1,31 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'org.haxcess.turmite'
+    compileSdk 35
+    ndkVersion '28.0.13004108'
+    defaultConfig {
+        applicationId 'org.haxcess.turmite'
+        minSdk 23
+        targetSdk 35
+        versionCode 1
+        versionName '0.1'
+        ndk { abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86_64' }
+        externalNativeBuild {
+            cmake { arguments '-DANDROID_STL=none' }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildTypes {
+        release { minifyEnabled false }
+    }
+}

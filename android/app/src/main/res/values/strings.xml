@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Turmite Universe</string>
+    <string name="intro">Concurrent cellular automata</string>
+    <string name="preview">Preview</string>
+    <string name="screensaver_settings">Screensaver settings</string>
+    <string name="settings_unavailable">Screensaver settings are unavailable. Open your device’s display settings.</string>
+    <string name="render_failed">Unable to start Turmite. See logcat for details.</string>
+</resources>
