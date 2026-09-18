@@ -48,6 +48,10 @@ typedef struct {
 int scheduler_init(Scheduler *scheduler, AntColony *colony, SchedulerPolicy policy, size_t quantum);
 void scheduler_destroy(Scheduler *scheduler);
 Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us, size_t *granted_quantum);
+/* Nonblocking global selection; caller keeps distinct member objects alive.
+ * NULL members are skipped. Never mix group and standalone workers on a member. */
+Ant *scheduler_acquire_group(Scheduler *const *members, size_t count,
+                             uint64_t now_us, size_t *selected, size_t *grant);
 void scheduler_release(Scheduler *scheduler, Ant *ant, size_t executed, uint64_t now_us);
 void scheduler_set_quantum(Scheduler *scheduler, size_t quantum);
 void scheduler_set_min_service(Scheduler *scheduler, size_t min_service);

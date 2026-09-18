@@ -15,7 +15,7 @@
 
 One worker lease per ant. Selection and release use the scheduler mutex; execution occurs outside it.
 
-Policy: WFQ-like credit scan across at most 32 slots. Eligible candidates gain weight; greatest credit wins, ties favor lower index. Release subtracts executed work. Credit uses `double`; tokens use unsigned Q16.
+Policy: WFQ-like credit scan across every registered universe (at most 32 slots each). Eligible candidates gain weight; greatest credit wins, ties favor lower universe slot, then lower ant index. Release subtracts executed work. Global selection recenters all active member credits on the winner; this preserves ordering and gives restarted universes a current baseline. Credit uses `double`; tokens use unsigned Q16.
 
 | Phenotype | Initial / HALT-reborn range |
 | --- | --- |
@@ -30,7 +30,7 @@ Normal dispatch threshold: `min(min_service, quantum, floor(capacity))`. Grant: 
 
 ## Collisions and mutation
 
-Occupancy byte: 0 = empty, 1–32 = ant index + 1. Movement conditionally releases the source, then CAS-claims the destination. Greater token balance wins; ties favor lower index. A winning challenger replaces the resident.
+Occupancy byte: 0 = empty, 1–32 = ant index + 1. Movement conditionally releases the source, then CAS-claims the destination. Greater token balance wins; ties favor lower universe slot, then lower ant index. A winning challenger replaces the resident.
 
 1. Mark loser `CLOBBERED | DISPLACED`.
 2. Stop at an instruction boundary and release lease. Failed claims end the grant immediately; an in-flight resident instruction may finish.
@@ -64,7 +64,7 @@ HALT is the exception to collision-only runtime variation. Cloning copies existi
 
 32-bit Galois LFSR, feedback `0x80200003`; zero remapped. Host entropy: `/dev/urandom`, process/time fallback. Initial display ordinal i uses `base_seed XOR (0x9e3779b9 × i)` modulo 2³²; zero becomes 1. Ordinal is independent of SDL display index.
 
-Seeds reproduce initialization, not thread timing, token accrual, or collisions. Restart stops/joins workers, clears state and capture history, discards runtime variants, obtains fresh entropy, and restores startup configuration. Pause blocks new normal dispatches; existing work, lifecycle, capture, and elapsed-time refill remain active.
+Seeds reproduce initialization, not thread timing, token accrual, or collisions. Restart suspends the universe and drains its outstanding leases, clears state and capture history, discards runtime variants, obtains fresh entropy, and restores startup configuration. Pause blocks new normal dispatches; existing work, lifecycle, capture, and elapsed-time refill remain active.
 
 Instruction/mutation counters accumulate per slot across HALT rebirths within a universe. `mutations` counts collision edits only.
 

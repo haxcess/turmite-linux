@@ -29,3 +29,6 @@ src/*.d
 /android/*.jks
 /android/*.keystore
 /android/.docker-cache/
+
+/tests/worker_pool_test
+/tests/worker_pool_test_tsan

@@ -46,3 +46,5 @@ git diff
 Stage, commit, and publish manually.
 
 [Experiments](EXPERIMENTS.md) · [Profiling](MEMORY_AND_PERF.md) · [Porting](stm32/INTEGRATION.md)
+
+`make worker-pool-test`: 20 ants across three universes, two workers, lease exclusivity, independent pause/reset, partial thread-creation failure. `make worker-pool-tsan-test`: same workload under ThreadSanitizer.

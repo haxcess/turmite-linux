@@ -4,6 +4,7 @@
 #include "rng.h"
 #include "rules.h"
 #include "scheduler.h"
+#include "worker_pool.h"
 #include "world.h"
 
 #include <SDL2/SDL.h>
@@ -21,7 +22,7 @@
 
 /* Linux orchestration: main owns SDL windows/events/presentation. Each monitor
  * has an independent universe controller for lifecycle, capture and frame
- * preparation, plus its own ant workers. SDL is never called by those threads. */
+ * preparation, plus a shared process-wide ant worker pool. SDL is never called by those threads. */
 
 #define DEFAULT_WIDTH 1200
 #define DEFAULT_HEIGHT 800
@@ -103,33 +104,9 @@ typedef struct {
     bool headless;
     bool stdin_eof;
     double started_at;
-    pthread_t *threads;
+    WorkerPool *pool;
+    size_t pool_slot;
 } Universe;
-
-typedef struct {
-    Universe *u;
-    size_t worker_id;
-} WorkerArg;
-
-/* Worker threads are intentionally thin: acquire one logical ant, execute its
- * granted burst, then return accounting to the scheduler. The same shape maps
- * naturally onto RTOS worker tasks later. */
-static void *worker_main(void *arg)
-{
-    WorkerArg *wa = arg;
-    Universe *u = wa->u;
-
-    while (!atomic_load_explicit(&u->quit, memory_order_acquire)) {
-        size_t quantum = 0;
-        Ant *ant = scheduler_acquire(&u->scheduler, mono_microseconds(), &quantum);
-        if (!ant) break;
-
-        size_t executed = ant_execute_quantum(ant, &u->colony, &u->world, quantum);
-        scheduler_release(&u->scheduler, ant, executed, mono_microseconds());
-    }
-
-    return NULL;
-}
 
 /* Reset the shared tape and ant population for a fresh universe while keeping
  * the process-level configuration (display, workers, scheduler tuning) intact. */
@@ -149,11 +126,10 @@ static void universe_seed(Universe *u)
     u->started_at = now;
 }
 
-/* Called on main only, after all controller/ant threads have been joined. */
+/* Called on main only, after its controller has stopped; suspension drains remaining leases. */
 static void universe_destroy(Universe *u)
 {
-    free(u->threads);
-    u->threads = NULL;
+    worker_pool_suspend(u->pool, u->pool_slot);
     free(u->display_cells);
     u->display_cells = NULL;
     for (size_t i = 0; i < DISPLAY_FRAME_SLOTS; ++i) {
@@ -201,8 +177,6 @@ static int universe_init(Universe *u, uint32_t seed)
         snprintf(title, sizeof(title), "Turmite Universe — display %d", u->display_index);
         SDL_SetWindowTitle(u->renderer.window, title);
     }
-    u->threads = calloc(u->workers, sizeof(*u->threads));
-    if (!u->threads) goto fail;
     return 0;
 fail:
     fprintf(stderr, "universe initialization failed (display %d)\n", u->display_index);
@@ -212,30 +186,6 @@ fail:
 
 /* Workers are independent consumers of scheduler leases. Partial startup
  * failure stops the scheduler and joins already-created threads before return. */
-static int universe_start_workers(Universe *u, WorkerArg *args)
-{
-    for (size_t i = 0; i < u->workers; ++i) {
-        args[i].u = u;
-        args[i].worker_id = i;
-        if (pthread_create(&u->threads[i], NULL, worker_main, &args[i]) != 0) {
-            fprintf(stderr, "pthread_create failed for worker %zu\n", i);
-            u->failed = true;
-            atomic_store_explicit(&u->quit, true, memory_order_release);
-            scheduler_stop(&u->scheduler);
-            for (size_t j = 0; j < i; ++j) pthread_join(u->threads[j], NULL);
-            return -1;
-        }
-    }
-    return 0;
-}
-
-static void universe_stop_workers(Universe *u, size_t created)
-{
-    scheduler_stop(&u->scheduler);
-    scheduler_wake_all(&u->scheduler);
-    for (size_t i = 0; i < created; ++i) pthread_join(u->threads[i], NULL);
-}
-
 /* Parsing helpers reject zero for numeric controls where zero has no useful
  * interpretation; callers add any narrower semantic range checks. */
 static bool parse_uint(const char *s, size_t *out)
@@ -284,7 +234,7 @@ static const OptionHelp option_help[] = {
     {'q', "quantum",             "N",   "maximum instructions per dispatch (1..4096)"},
     {'b', "min-service",         "N",   "minimum normal dispatch batch (default 16)"},
     {'v', "token-rate-divisor",  "N",   "divide all ant token generation rates (default 1)"},
-    {'w', "workers",             "N",   "ant threads PER universe (default 2)"},
+    {'w', "workers",             "N",   "shared ant threads across all universes (default 2)"},
     {'p', "display",             "N",   "select monitor N for single-window modes (default 0)"},
     {'W', "windowed",            NULL,  "one normal window on selected monitor (default)"},
     {'F', "fullscreen",          NULL,  "fullscreen on selected monitor"},
@@ -491,9 +441,8 @@ static void universe_present(Universe *u)
  * never on SDL's main thread and never on an ant execution worker. */
 static bool run_universe(Universe *u)
 {
-    WorkerArg args[8];
     bool timed_out = false;
-    if (universe_start_workers(u, args) != 0) return false;
+    worker_pool_enable(u->pool, u->pool_slot, &u->scheduler, &u->world);
 
     dump_capture_reset(&u->dump, &u->world, u->seed, u->started_at);
     dump_capture_now(&u->dump, &u->world, &u->colony, &u->scheduler, &u->rng, 0.0, mono_seconds());
@@ -536,7 +485,7 @@ static bool run_universe(Universe *u)
         }
     }
 
-    universe_stop_workers(u, u->workers);
+    worker_pool_suspend(u->pool, u->pool_slot);
 
     if (u->debug_dump) {
         double final_age = mono_seconds() - u->started_at;
@@ -692,7 +641,10 @@ int main(int argc, char **argv)
         return 2;
     }
     const size_t count = headless || !all_displays ? 1u : (size_t)displays;
-    Universe *universes = calloc(count, sizeof(*universes));
+    Universe *universes = NULL;
+    if (count <= SIZE_MAX / sizeof(*universes) &&
+        posix_memalign((void **)&universes, _Alignof(Universe), count * sizeof(*universes)) == 0)
+        memset(universes, 0, count * sizeof(*universes));
     if (!universes) {
         if (!headless) renderer_shutdown();
         return 1;
@@ -744,6 +696,15 @@ int main(int argc, char **argv)
         }
         ++initialized;
     }
+    WorkerPool *pool = NULL;
+    if (!result) {
+        pool = worker_pool_create(count, workers);
+        if (!pool) { fprintf(stderr, "shared worker pool initialization failed\n"); result = 1; }
+        else for (size_t i = 0; i < count; ++i) {
+            universes[i].pool = pool;
+            universes[i].pool_slot = i;
+        }
+    }
     if (!result && headless) {
         (void)universe_control(&universes[0]);
         result = universes[0].failed ? 1 : 0;
@@ -783,6 +744,7 @@ int main(int argc, char **argv)
         if (universes[i].controller_started) pthread_join(universes[i].controller, NULL);
         universe_destroy(&universes[i]);
     }
+    worker_pool_destroy(pool);
     free(universes);
     if (!headless) renderer_shutdown();
     return result;

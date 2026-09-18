@@ -102,7 +102,10 @@ int main(void)
     pthread_join(producer, NULL);
     atomic_store(&u[0].done, false);
     universe_seed(&u[0]);
+    WorkerPool *pool = worker_pool_create(2, 2);
+    assert(pool);
     for (size_t i = 0; i < 2; ++i) {
+        u[i].pool = pool; u[i].pool_slot = i;
         assert(pthread_create(&u[i].controller, NULL, universe_control, &u[i]) == 0);
         u[i].controller_started = true;
     }
@@ -163,6 +166,7 @@ int main(void)
     universe_destroy(&u[1]);
     /* Idempotent cleanup covers the application's final sweep. */
     universe_destroy(&u[0]);
+    worker_pool_destroy(pool);
     renderer_shutdown();
     puts("multi-window ok: independent worlds/controls, frame ownership, restart, close, peer survival");
     return 0;
