@@ -20,6 +20,7 @@ Default: one 1200 × 800 window on display 0, HUD hidden. **Esc** closes a windo
 | `-W`, `-F`, `-A` | Windowed, selected-display fullscreen, all-display fullscreen |
 | `-p N` | Select display for single-window modes |
 | `-u` | Show HUD |
+| `-c N`, `--cell-size N` | Pixels per cell (1–10); preserves window dimensions |
 | `--ants N`, `--workers N` | Population and workers per universe |
 | `--quantum N`, `--min-service N` | Execution batch limits |
 | `-v N` | Token refill divisor |

@@ -22,6 +22,10 @@ Core stores logical indices only. Fixed palette; no ink history or palette drift
 
 Converters retain no buffers. Caller supplies stable, sufficiently sized, non-overlapping input/mapping/output storage. Invalid indices map to 0. Null buffers, invalid dimensions, or insufficient capacity fail before writing output.
 
+## Cell scaling
+
+`-c` / `--cell-size` selects 1–10 canvas pixels per logical cell. Window/fullscreen dimensions are unchanged. Simulation and texture dimensions use integer division; SDL scales to the full output rectangle with nearest-neighbor sampling. Dumps and frame buffers use logical dimensions. HUD coordinates remain in output pixels.
+
 ## Linux buffers
 
 Each controller targets 30 Hz, independently of workers. It samples one index frame, converts into one of three ARGB buffers, and publishes pixels plus HUD metadata under a short handoff mutex. Main presents the newest frame. Unread frames may be replaced; a frame held for presentation cannot be overwritten. Sampling, conversion, and uploads occur outside the handoff lock.

@@ -2,7 +2,7 @@
 
 ## Storage
 
-Per universe: `N = width × height`, `P = capture pages`. Current host atomic sizes:
+Per universe: `N = logical_width × logical_height` (canvas dimensions divided by `--cell-size`, rounded down), `P = capture pages`. Current host atomic sizes:
 
 | Allocation | Bytes | Headless |
 | --- | ---: | --- |

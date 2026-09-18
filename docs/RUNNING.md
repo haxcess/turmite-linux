@@ -25,6 +25,7 @@ make
 | `-F`, `--fullscreen` | Fullscreen on selected display |
 | `-A`, `--fullscreen-all` | Independent fullscreen universe per detected monitor |
 | `-x`, `--width N`; `-y`, `--height N` | 1200 × 800; windowed/headless |
+| `-c`, `--cell-size N` | 1; integer pixels per cell, 1–10 |
 | `-m`, `--minutes N` | 0.4 (24 seconds); positive restart interval |
 | `-u`, `--hud`; `-n`, `--no-hud` | Show/hide HUD; hidden by default |
 | `-H`, `--headless` | One universe without SDL video initialization |
@@ -42,6 +43,17 @@ Last mode (`-W`/`-F`/`-A`) and HUD flag win. `-A` ignores `-p`. Fullscreen uses 
 ./turmite --ants 4 --workers 4 --quantum 790 --min-service 1000
 ./turmite --headless --width 300 --height 200 --dump-pages 7
 ```
+
+## Cell size
+
+`--width`/`--height` remain canvas pixel dimensions; fullscreen uses monitor pixels. With `-c N`, logical dimensions are `floor(width/N) × floor(height/N)`. SDL scales that texture to fill the unchanged window using nearest-neighbor sampling. Non-divisible dimensions can produce slightly uneven cell widths; no border is left unused. Headless mode applies the same division.
+
+```sh
+./turmite --fullscreen --cell-size 4
+./turmite -W --width 1200 --height 800 -c 5
+```
+
+Tape, occupancy, snapshots, ARGB frames, and dump pages shrink by approximately `N²`; SDL output resources remain window-sized. A 1920 × 1080 canvas at size 4 simulates 480 × 270 cells. Dumps record logical dimensions.
 
 ## Controls
 
