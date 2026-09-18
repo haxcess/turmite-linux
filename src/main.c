@@ -498,10 +498,10 @@ static bool run_universe(Universe *u)
     dump_capture_reset(&u->dump, &u->world, u->seed, u->started_at);
     dump_capture_now(&u->dump, &u->world, &u->colony, &u->scheduler, &u->rng, 0.0, mono_seconds());
 
-    /* Rendering is independently throttled to 60 Hz. Simulation workers are not
+    /* Rendering is independently throttled to 30 Hz. Simulation workers are not
      * frame-locked and may execute any amount of work between observations. */
     double next_frame = mono_seconds();
-    const double frame_period = 1.0 / 60.0;
+    const double frame_period = 1.0 / 30.0;
 
     while (!atomic_load_explicit(&u->quit, memory_order_acquire) && !u->restart) {
         universe_apply_commands(u);
