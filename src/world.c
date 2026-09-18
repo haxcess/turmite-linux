@@ -42,13 +42,3 @@ void world_store(World *world, size_t index, uint8_t value)
     if (!world || index >= world->cells) return;
     world_store_cell(world, index, value);
 }
-
-/* Coordinates wrap toroidally; the executor uses equivalent branch wrapping. */
-size_t world_index(const World *world, int x, int y)
-{
-    int xx = x % world->width;
-    int yy = y % world->height;
-    if (xx < 0) xx += world->width;
-    if (yy < 0) yy += world->height;
-    return (size_t)yy * (size_t)world->width + (size_t)xx;
-}

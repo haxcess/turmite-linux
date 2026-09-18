@@ -61,7 +61,6 @@ uint64_t scheduler_get_empty_scans(const Scheduler *scheduler);
 uint64_t scheduler_get_idle_waits(const Scheduler *scheduler);
 uint64_t scheduler_get_granted_instructions(const Scheduler *scheduler);
 void scheduler_set_paused(Scheduler *scheduler, bool paused);
-bool scheduler_is_paused(const Scheduler *scheduler);
 void scheduler_wake_all(Scheduler *scheduler);
 void scheduler_stop(Scheduler *scheduler);
 
@@ -70,7 +69,5 @@ void scheduler_stop(Scheduler *scheduler);
 int scheduler_double_population(Scheduler *scheduler, World *world, Lfsr32 *rng, uint64_t now_us);
 int scheduler_begin_halving(Scheduler *scheduler, size_t target_population);
 size_t scheduler_active_population(const Scheduler *scheduler);
-
-double scheduler_fair_credit(const Scheduler *scheduler, size_t ant_index);
 
 #endif

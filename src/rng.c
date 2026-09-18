@@ -12,15 +12,13 @@ void rng_seed(Lfsr32 *rng, uint32_t seed)
     atomic_store_explicit(&rng->state, seed, memory_order_relaxed);
 }
 
-/* Galois LFSR step. The CAS loop lets multiple control/setup threads advance
- * one generator without a mutex; runtime ants use private copies instead. */
+/* The CAS loop lets multiple control/setup threads advance one generator
+ * without a mutex; runtime ants use private lfsr32_advance() streams instead. */
 uint32_t rng_next(Lfsr32 *rng)
 {
     uint32_t old = atomic_load_explicit(&rng->state, memory_order_relaxed);
     for (;;) {
-        uint32_t lsb = old & 1u;
-        uint32_t next = old >> 1;
-        if (lsb) next ^= 0x80200003u;
+        uint32_t next = lfsr32_advance(old);
         if (atomic_compare_exchange_weak_explicit(
                 &rng->state, &old, next,
                 memory_order_relaxed, memory_order_relaxed)) {

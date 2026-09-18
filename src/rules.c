@@ -1,5 +1,7 @@
 #include "rules.h"
 
+#include "rng.h"
+
 /* Compact constructors keep the static rule catalogue readable. Each table row
  * is one internal state; each column is the color currently under the ant. */
 #define A(w,t,n) { (uint8_t)(w), (t), (uint8_t)(n), false }
@@ -206,10 +208,8 @@ size_t rules_index_of(const TurmiteRule *rule)
 
 static uint32_t rule_random(uint32_t *state, uint32_t limit)
 {
-    uint32_t x = *state ? *state : 1u;
-    x = (x >> 1) ^ ((x & 1u) ? UINT32_C(0x80200003) : 0u);
-    *state = x;
-    return x % limit;
+    *state = lfsr32_advance(*state);
+    return *state % limit;
 }
 
 /* Weights halve for each added unit: states 8:4:2:1, colors 32:16:8:4:2:1.

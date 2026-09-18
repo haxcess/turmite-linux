@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <inttypes.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,12 +37,6 @@ static uint32_t count_changed(const uint8_t *a, const uint8_t *b, size_t n)
     return changed;
 }
 
-static size_t round_down_power_of_two_minus_one(size_t pages)
-{
-    /* Accepted values are 1,3,7,...,1023. Caller validates. */
-    return pages;
-}
-
 bool dump_pages_value_valid(size_t pages)
 {
     if (pages == 0 || pages > 1023) return false;
@@ -60,7 +55,7 @@ int dump_capture_init(DumpCapture *capture, const World *world, uint32_t seed,
         return -1;
     }
     memset(capture, 0, sizeof(*capture));
-    const size_t pages = round_down_power_of_two_minus_one(requested_pages);
+    const size_t pages = requested_pages;
     capture->cells = world->cells;
     capture->ant_slots = TURMITE_MAX_ANTS;
     capture->page_capacity = pages;
@@ -140,8 +135,8 @@ static void capture_one(DumpCapture *capture, const World *world, const AntColon
     meta->changed_cells = count_changed(dst, previous, capture->cells);
     meta->rng_state = rng ? atomic_load_explicit(&rng->state, memory_order_relaxed) : 0;
     meta->active_population = (uint32_t)atomic_load_explicit(&colony->active_population, memory_order_relaxed);
-    meta->quantum = (uint32_t)scheduler_get_quantum((Scheduler *)scheduler);
-    meta->min_service = (uint32_t)scheduler_get_min_service((Scheduler *)scheduler);
+    meta->quantum = (uint32_t)scheduler_get_quantum(scheduler);
+    meta->min_service = (uint32_t)scheduler_get_min_service(scheduler);
 
     /* Scheduler-owned fair credit is sampled under its mutex; most other ant
      * fields are atomic and can be observed directly. */
@@ -201,9 +196,17 @@ static int make_dir_if_missing(const char *path)
     return -1;
 }
 
-static void write_heading(FILE *fp, const char *key, const char *value)
+/* Every top-of-manifest line is one key=value pair; funneling all of them
+ * through this instead of a direct fprintf per line keeps their formatting
+ * (and the trailing newline) from drifting apart line to line. */
+static void write_kv(FILE *fp, const char *key, const char *fmt, ...)
 {
-    fprintf(fp, "%s=%s\n", key, value);
+    fprintf(fp, "%s=", key);
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(fp, fmt, ap);
+    va_end(ap);
+    fputc('\n', fp);
 }
 
 static void make_timestamp(char *buf, size_t size)
@@ -254,21 +257,25 @@ int dump_write(const DumpCapture *capture, const World *world, const AntColony *
 
     /* Manifest is text for quick inspection; raw pages stay compact binary. */
     fprintf(manifest, "TURMITE UNIVERSE DEBUG DUMP\n");
-    write_heading(manifest, "format", "v1");
-    fprintf(manifest, "seed=0x%08" PRIX32 "\n", capture->seed);
-    fprintf(manifest, "world_width=%d\n", capture->world_width);
-    fprintf(manifest, "world_height=%d\n", capture->world_height);
-    fprintf(manifest, "world_cells=%zu\n", capture->cells);
-    fprintf(manifest, "colors=%d\n", TURMITE_COLORS);
-    fprintf(manifest, "cell_format=uint8 color index, row-major, top-to-bottom\n");
-    fprintf(manifest, "workers=%zu\n", workers);
-    fprintf(manifest, "scheduler=WFQ\n");
-    fprintf(manifest, "quantum=%zu\n", quantum);
-    fprintf(manifest, "min_service=%zu\n", scheduler_get_min_service(scheduler));
-    fprintf(manifest, "lifetime_minutes=%.6f\n", lifetime_minutes);
-    fprintf(manifest, "capture_interval_seconds=%.6f\n", capture->interval_seconds);
-    fprintf(manifest, "requested_pages=%zu\n", capture->page_capacity);
-    fprintf(manifest, "captured_pages=%zu\n", capture->page_count);
+    write_kv(manifest, "format", "%s", "v1");
+    write_kv(manifest, "seed", "0x%08" PRIX32, capture->seed);
+    write_kv(manifest, "world_width", "%d", capture->world_width);
+    write_kv(manifest, "world_height", "%d", capture->world_height);
+    write_kv(manifest, "world_cells", "%zu", capture->cells);
+    write_kv(manifest, "colors", "%d", TURMITE_COLORS);
+    write_kv(manifest, "cell_format", "%s", "uint8 color index, row-major, top-to-bottom");
+    write_kv(manifest, "workers", "%zu", workers);
+    write_kv(manifest, "scheduler", "%s", "WFQ");
+    write_kv(manifest, "quantum", "%zu", quantum);
+    write_kv(manifest, "min_service", "%zu", scheduler_get_min_service(scheduler));
+    /* Unlike quantum/min_service, this has no interactive keybinding to change
+     * it mid-run, so one manifest-level value (rather than a per-page column)
+     * fully describes it. */
+    write_kv(manifest, "token_rate_divisor", "%" PRIu32, scheduler_get_token_rate_divisor(scheduler));
+    write_kv(manifest, "lifetime_minutes", "%.6f", lifetime_minutes);
+    write_kv(manifest, "capture_interval_seconds", "%.6f", capture->interval_seconds);
+    write_kv(manifest, "requested_pages", "%zu", capture->page_capacity);
+    write_kv(manifest, "captured_pages", "%zu", capture->page_count);
     fprintf(manifest, "\nPAGE TABLE\n");
     fprintf(manifest, "page\tage_seconds\tworld_hash_hex\tchanged_cells\tcollisions\tdispatches\tinstructions\trng_state_hex\tactive_population\tquantum\tmin_service\n");
 

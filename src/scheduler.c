@@ -245,11 +245,6 @@ void scheduler_set_paused(Scheduler *scheduler, bool paused)
     pthread_mutex_unlock(&scheduler->lock);
 }
 
-bool scheduler_is_paused(const Scheduler *scheduler)
-{
-    return scheduler ? atomic_load_explicit(&scheduler->paused, memory_order_acquire) : false;
-}
-
 void scheduler_set_token_rate_scale(Scheduler *scheduler, uint32_t scale)
 {
     atomic_store_explicit(&scheduler->token_rate_scale, scale ? scale : 1u, memory_order_release);
@@ -308,15 +303,6 @@ void scheduler_stop(Scheduler *scheduler)
 size_t scheduler_active_population(const Scheduler *scheduler)
 {
     return atomic_load_explicit(&scheduler->colony->active_population, memory_order_relaxed);
-}
-
-double scheduler_fair_credit(const Scheduler *scheduler, size_t ant_index)
-{
-    if (!scheduler || ant_index >= TURMITE_MAX_ANTS) return 0.0;
-    pthread_mutex_lock((pthread_mutex_t *)&scheduler->lock);
-    double c = scheduler->fair_credit[ant_index];
-    pthread_mutex_unlock((pthread_mutex_t *)&scheduler->lock);
-    return c;
 }
 
 int scheduler_init(Scheduler *scheduler, AntColony *colony, SchedulerPolicy policy, size_t quantum)

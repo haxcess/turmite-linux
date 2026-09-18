@@ -38,7 +38,6 @@
 #define MAX_QUANTUM 4096
 #define DEFAULT_DUMP_PAGES 127
 #define DEFAULT_DUMP_INTERVAL 1.0
-#define MAX_DUMP_PAGES 1023
 
 /* Monotonic time drives simulation age and token accounting so wall-clock
  * adjustments cannot make ants gain or lose execution budget unexpectedly. */
@@ -269,39 +268,56 @@ static bool parse_seed(const char *s, uint32_t *out)
     return true;
 }
 
+/* Every option accepted by getopt_long() below has a short form, so every
+ * entry here documents both. Order matches the opts[]/optstring order so the
+ * two can be diffed against each other by eye. */
+typedef struct {
+    char short_opt;
+    const char *long_opt;
+    const char *arg_name; /* NULL for options that take no argument */
+    const char *description;
+} OptionHelp;
+
+static const OptionHelp option_help[] = {
+    {'s', "seed",               "HEX",  "deterministic universe seed"},
+    {'a', "ants",                "N",   "2,4,8,16,32"},
+    {'q', "quantum",             "N",   "maximum instructions per dispatch (1..4096)"},
+    {'b', "min-service",         "N",   "minimum normal dispatch batch (default 16)"},
+    {'v', "token-rate-divisor",  "N",   "divide all ant token generation rates (default 1)"},
+    {'w', "workers",             "N",   "ant threads PER universe (default 2)"},
+    {'p', "display",             "N",   "select monitor N for single-window modes (default 0)"},
+    {'W', "windowed",            NULL,  "one normal window on selected monitor (default)"},
+    {'F', "fullscreen",          NULL,  "fullscreen on selected monitor"},
+    {'A', "fullscreen-all",      NULL,  "fullscreen on every detected monitor"},
+    {'u', "hud",                 NULL,  "show developer HUD (hidden by default)"},
+    {'x', "width",               "N",   "windowed/headless universe width (default 1200)"},
+    {'y', "height",              "N",   "windowed/headless universe height (default 800)"},
+    {'m', "minutes",             "N",   "universe lifetime (default 5)"},
+    {'d', "dump-pages",          "N",   "retained debug pages: 1,3,7,...,1023 (default 127)"},
+    {'i', "dump-interval",       "N",   "seconds between retained pages (default 1)"},
+    {'D', "dump-dir",            "PATH","parent directory for debug dumps (default ./turmite-dumps)"},
+    {'n', "no-hud",              NULL,  "hide developer HUD"},
+    {'H', "headless",            NULL,  "run without SDL; type Q then Enter to debug-quit"},
+    {'h', "help",                NULL,  "show this help"},
+};
+
 static void usage(const char *prog)
 {
     printf("Usage: %s [options]\n", prog);
-    printf("  --seed HEX             deterministic universe seed\n");
-    printf("  --ants N               2,4,8,16,32\n");
-    printf("  --quantum N            maximum instructions per dispatch (1..4096)\n");
-    printf("  --min-service N        minimum normal dispatch batch (default 16)\n");
-    printf("  --token-rate-divisor N divide all ant token generation rates (default 1)\n");
-    printf("  --workers N            ant threads PER universe (default 2)\n");
-    printf("  -p, --display N        select monitor N for single-window modes (default 0)\n");
-    printf("  -W, --windowed         one normal window on selected monitor (default)\n");
-    printf("  -F, --fullscreen       fullscreen on selected monitor\n");
-    printf("  -A, --fullscreen-all   fullscreen on every detected monitor\n");
-    printf("  --width N              windowed/headless universe width (default 1200)\n");
-    printf("  --height N             windowed/headless universe height (default 800)\n");
-    printf("  --minutes N            universe lifetime (default 5)\n");
-    printf("  --dump-pages N         retained debug pages: 1,3,7,...,1023 (default 127)\n");
-    printf("  --dump-interval N      seconds between retained pages (default 1)\n");
-    printf("  --dump-dir PATH        parent directory for debug dumps (default ./turmite-dumps)\n");
-    printf("  -u, --hud              show developer HUD (hidden by default)\n");
-    printf("  -n, --no-hud           hide developer HUD\n");
-    printf("  --headless             run without SDL; type Q then Enter to debug-quit\n");
-    printf("  --help                 show this help\n");
+    for (size_t i = 0; i < sizeof(option_help) / sizeof(option_help[0]); ++i) {
+        const OptionHelp *o = &option_help[i];
+        char left[40];
+        if (o->arg_name)
+            snprintf(left, sizeof(left), "-%c, --%s %s", o->short_opt, o->long_opt, o->arg_name);
+        else
+            snprintf(left, sizeof(left), "-%c, --%s", o->short_opt, o->long_opt);
+        printf("  %-28s %s\n", left, o->description);
+    }
 }
 
 static bool valid_population(size_t n)
 {
     return n == 2 || n == 4 || n == 8 || n == 16 || n == 32;
-}
-
-static bool valid_dump_pages(size_t n)
-{
-    return n >= 1 && n <= MAX_DUMP_PAGES && ((n + 1) & n) == 0;
 }
 
 static void choose_new_seed(Universe *u)
@@ -655,7 +671,7 @@ int main(int argc, char **argv)
             case 'x': if (!parse_uint(optarg, &width)) { fprintf(stderr, "bad --width\n"); return 2; } break;
             case 'y': if (!parse_uint(optarg, &height)) { fprintf(stderr, "bad --height\n"); return 2; } break;
             case 'm': minutes = strtod(optarg, NULL); if (minutes <= 0.0) { fprintf(stderr, "bad --minutes\n"); return 2; } break;
-            case 'd': if (!parse_uint(optarg, &dump_pages) || !valid_dump_pages(dump_pages)) { fprintf(stderr, "--dump-pages must be 1,3,7,...,1023\n"); return 2; } break;
+            case 'd': if (!parse_uint(optarg, &dump_pages) || !dump_pages_value_valid(dump_pages)) { fprintf(stderr, "--dump-pages must be 1,3,7,...,1023\n"); return 2; } break;
             case 'i': dump_interval = strtod(optarg, NULL); if (dump_interval <= 0.0) { fprintf(stderr, "bad --dump-interval\n"); return 2; } break;
             case 'D': dump_root = optarg; break;
             case 'n': hud = false; break;
