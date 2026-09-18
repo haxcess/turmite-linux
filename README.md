@@ -27,3 +27,4 @@ Default: one 1200 × 800 window on display 0, HUD hidden. **Esc** closes a windo
 | `--minutes N` | Universe restart interval |
 
 [Options and controls](docs/RUNNING.md) · [Technical documentation](docs/README.md) · [Rule lab](rule-lab.html) ([guide](docs/RULE_LAB.md))
+[Video Example](https://www.youtube.com/watch?v=GZKU-f88IsI)

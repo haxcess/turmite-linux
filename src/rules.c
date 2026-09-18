@@ -246,6 +246,14 @@ static const TurmiteRule RULES[] = {
         { A(0, TURN_R, 1), A(0, TURN_L, 0) },
         { A(1, TURN_L, 1), A(1, TURN_B, 0) }
         }
+    },
+    {
+        "alex_marcher", "Marching Squaremuncher", 3, 2,
+        {
+        { A(0, TURN_F, 2), A(0, TURN_R, 0) },
+        { A(1, TURN_L, 0), A(0, TURN_R, 1) },
+        { A(1, TURN_B, 2), A(1, TURN_R, 1) }
+        }
     }
 };
 
