@@ -82,6 +82,22 @@ int main(void)
     assert(u[0].colony.occupancy != u[1].colony.occupancy);
     assert(SDL_GetWindowID(u[0].renderer.window) != SDL_GetWindowID(u[1].renderer.window));
 
+    assert(memcmp(u[0].palette, RENDER_BASE_PALETTE, sizeof(u[0].palette)) == 0);
+    u[0].palette_mode = RENDER_PALETTE_RANDOM;
+    universe_seed(&u[0]);
+    u[1].palette_mode = RENDER_PALETTE_RANDOMISH;
+    universe_seed(&u[1]);
+    uint32_t palette0[TURMITE_COLORS], palette1[TURMITE_COLORS];
+    memcpy(palette0, u[0].palette, sizeof(palette0));
+    memcpy(palette1, u[1].palette, sizeof(palette1));
+    assert(memcmp(palette0, palette1, sizeof(palette0)) != 0);
+    universe_seed(&u[0]);
+    assert(memcmp(palette0, u[0].palette, sizeof(palette0)) == 0);
+    ++u[0].seed;
+    universe_seed(&u[0]);
+    assert(memcmp(palette0, u[0].palette, sizeof(palette0)) != 0);
+    assert(memcmp(palette1, u[1].palette, sizeof(palette1)) == 0);
+
     /* A producer may outrun the UI. Every consumed slot must still contain
      * one complete generation, and retained frames must remain immutable. */
     pthread_t producer;
@@ -92,7 +108,7 @@ int main(void)
         if (u[0].displayed_frame >= 0) {
             const int slot = u[0].displayed_frame;
             const uint8_t color = (uint8_t)((size_t)observed(&u[0]).age % TURMITE_COLORS);
-            const uint32_t expected = 0xff000000u | RENDER_BASE_PALETTE[color];
+            const uint32_t expected = 0xff000000u | u[0].palette[color];
             SDL_Delay(1);
             for (size_t cell = 0; cell < u[0].world.cells; ++cell)
                 assert(u[0].frame_pixels[slot][cell] == expected);

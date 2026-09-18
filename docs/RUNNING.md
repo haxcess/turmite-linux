@@ -25,6 +25,8 @@ make
 | `-F`, `--fullscreen` | Fullscreen on selected display |
 | `-A`, `--fullscreen-all` | Independent fullscreen universe per detected monitor |
 | `-x`, `--width N`; `-y`, `--height N` | 1200 × 800; windowed/headless |
+| `-R`, `--random` | Random HSV hues; saturation 80%, value 90% (color 0: 20%) |
+| `-r`, `--randomish` | Six hues spaced 32° across a random 160° arc; saturation 64–96%, value 90% (color 0: 20%) |
 | `-c`, `--cell-size N` | 1; integer pixels per cell, 1–10 |
 | `-m`, `--minutes N` | 0.4 (24 seconds); positive restart interval |
 | `-u`, `--hud`; `-n`, `--no-hud` | Show/hide HUD; hidden by default |

@@ -6,7 +6,7 @@ atomic logical tape → host snapshot → RenderFrame
                                      └─ render_codes → panel backend (pending)
 ```
 
-Core stores logical indices only. Fixed palette; no ink history or palette drift. Same-color rewrites have no distinct visual state.
+Core stores logical indices only. Palette fixed for each universe; no ink history or palette drift. Same-color rewrites have no distinct visual state.
 
 ## API
 
@@ -46,6 +46,15 @@ SDL events, uploads, window lifetime, and presentation stay on main. Fullscreen 
 | 3 | `#B58900` |
 | 4 | `#859900` |
 | 5 | `#288BD2` |
+
+`--random` (`-R`) replaces all six colors with LFSR-selected HSV hues across
+360°, with saturation 80% and value 90%. `--randomish` (`-r`) chooses a random
+160° arc with six equidistant hues (32° apart), with saturation varying ±20% relative to 80%
+(64–96%) and value fixed at 90%. Both modes lower color 0 to value 20%
+for a dark background. If both flags appear, the last wins.
+Each universe generates its own palette at creation and on restart; the same
+seed and mode reproduce the palette without consuming the simulation RNG.
+Without either flag, the base palette above is used.
 
 Rebuild and restart `./turmite` after palette edits. `turmite.exe` is a separate binary. Reset clears the tape; the next frame replaces the image.
 

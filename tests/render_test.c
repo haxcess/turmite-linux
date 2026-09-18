@@ -5,8 +5,74 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Recover HSV from quantized RGB to check the user-visible constraints. */
+static float palette_hue(uint32_t rgb, float *saturation, unsigned *value)
+{
+    float r = (float)((rgb >> 16) & 255), g = (float)((rgb >> 8) & 255);
+    float b = (float)(rgb & 255);
+    float hi = r > g ? r : g, lo = r < g ? r : g;
+    if (b > hi) hi = b;
+    if (b < lo) lo = b;
+    float delta = hi - lo;
+    assert(delta > 0);
+    *saturation = delta / hi;
+    *value = (unsigned)hi;
+    float h = hi == r ? (g - b) / delta :
+              hi == g ? 2.0f + (b - r) / delta : 4.0f + (r - g) / delta;
+    h *= 60.0f;
+    return h < 0 ? h + 360.0f : h;
+}
+
+static void test_palettes(void)
+{
+    uint32_t palette[TURMITE_COLORS], repeat[TURMITE_COLORS];
+    render_palette_init(palette, RENDER_PALETTE_DEFAULT, 0);
+    assert(memcmp(palette, RENDER_BASE_PALETTE, sizeof(palette)) == 0);
+    for (int mode = RENDER_PALETTE_RANDOM; mode <= RENDER_PALETTE_RANDOMISH; ++mode) {
+        bool sectors[6] = {false};
+        for (uint32_t seed = 0; seed < 1024; ++seed) {
+            render_palette_init(palette, (RenderPaletteMode)mode, seed);
+            render_palette_init(repeat, (RenderPaletteMode)mode, seed);
+            assert(memcmp(palette, repeat, sizeof(palette)) == 0);
+            float hues[TURMITE_COLORS];
+            for (size_t i = 0; i < TURMITE_COLORS; ++i) {
+                float sat;
+                unsigned value;
+                assert((palette[i] & 0xff000000u) == 0);
+                hues[i] = palette_hue(palette[i], &sat, &value);
+                sectors[(unsigned)(hues[i] / 60.0f)] = true;
+                assert(value == (i == 0 ? 51u : 230u));
+                /* Background channels are capped far below every other
+                 * color's brightest channel, regardless of selected hue. */
+                if (i > 0) {
+                    for (unsigned shift = 0; shift <= 16; shift += 8)
+                        assert(((palette[0] >> shift) & 255u) < value / 4);
+                }
+                if (mode == RENDER_PALETTE_RANDOM) assert(sat > 0.795f && sat < 0.805f);
+                else assert(sat >= 0.625f && sat <= 0.975f);
+            }
+            if (mode == RENDER_PALETTE_RANDOMISH) {
+                /* Check spacing after RGB quantization, including hue wrap. */
+                for (size_t i = 1; i < TURMITE_COLORS; ++i) {
+                    float gap = hues[i] - hues[i - 1];
+                    if (gap < 0) gap += 360;
+                    assert(gap > 30.0f && gap < 34.0f);
+                }
+                float span = hues[TURMITE_COLORS - 1] - hues[0];
+                if (span < 0) span += 360;
+                assert(span > 158.0f && span < 162.0f);
+            }
+        }
+        for (unsigned i = 0; i < 6; ++i) assert(sectors[i]);
+        render_palette_init(palette, (RenderPaletteMode)mode, 12345);
+        render_palette_init(repeat, (RenderPaletteMode)mode, 98765);
+        assert(memcmp(palette, repeat, sizeof(palette)) != 0);
+    }
+}
+
 int main(void)
 {
+    test_palettes();
     World world;
     assert(world_init(&world, 3, 2) == 0);
     uint8_t snapshot[6];

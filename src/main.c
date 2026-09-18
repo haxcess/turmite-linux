@@ -64,6 +64,8 @@ typedef struct {
     AntColony colony;
     Scheduler scheduler;
     Renderer renderer;
+    RenderPaletteMode palette_mode;
+    uint32_t palette[TURMITE_COLORS];
     uint8_t *display_cells;
     uint32_t *frame_pixels[DISPLAY_FRAME_SLOTS];
     RendererHud frame_hud[DISPLAY_FRAME_SLOTS];
@@ -115,6 +117,7 @@ static void universe_seed(Universe *u)
     world_clear(&u->world);
     ant_colony_reset(&u->colony);
     rng_seed(&u->rng, u->seed);
+    render_palette_init(u->palette, u->palette_mode, u->seed);
 
     double now = mono_seconds();
     for (size_t i = 0; i < u->initial_ants; ++i) {
@@ -240,6 +243,8 @@ static const OptionHelp option_help[] = {
     {'F', "fullscreen",          NULL,  "fullscreen on selected monitor"},
     {'A', "fullscreen-all",      NULL,  "fullscreen on every detected monitor"},
     {'u', "hud",                 NULL,  "show developer HUD (hidden by default)"},
+    {'R', "random",              NULL,  "random HSV hues, dark background, S=80%, V=90%"},
+    {'r', "randomish",           NULL,  "hues spaced 32 degrees in random 160-degree arc"},
     {'c', "cell-size",           "N",   "pixels per cell (1..10, default 1)"},
     {'x', "width",               "N",   "windowed/headless canvas width (default 1200)"},
     {'y', "height",              "N",   "windowed/headless canvas height (default 800)"},
@@ -404,7 +409,7 @@ static void universe_render(Universe *u, double age, bool paused)
     for (size_t i = 0; i < u->world.cells; ++i)
         u->display_cells[i] = world_load(&u->world, i);
     const RenderFrame frame = { (size_t)u->world.width, (size_t)u->world.height, u->display_cells };
-    (void)render_argb(&frame, RENDER_BASE_PALETTE, u->frame_pixels[slot], u->world.cells);
+    (void)render_argb(&frame, u->palette, u->frame_pixels[slot], u->world.cells);
     u->frame_hud[slot] = (RendererHud){
         .population = scheduler_active_population(&u->scheduler),
         .workers = u->workers,
@@ -576,6 +581,7 @@ int main(int argc, char **argv)
     double dump_interval = DEFAULT_DUMP_INTERVAL;
     const char *dump_root = dump_default_output_root();
     bool hud = false;
+    RenderPaletteMode palette_mode = RENDER_PALETTE_DEFAULT;
     uint32_t explicit_seed = 0;
     bool has_seed = false;
     bool headless = false;
@@ -592,6 +598,8 @@ int main(int argc, char **argv)
         {"fullscreen", no_argument, NULL, 'F'},
         {"fullscreen-all", no_argument, NULL, 'A'},
         {"hud", no_argument, NULL, 'u'},
+        {"random", no_argument, NULL, 'R'},
+        {"randomish", no_argument, NULL, 'r'},
         {"cell-size", required_argument, NULL, 'c'},
         {"width", required_argument, NULL, 'x'},
         {"height", required_argument, NULL, 'y'},
@@ -606,7 +614,7 @@ int main(int argc, char **argv)
     };
 
     for (;;) {
-        int c = getopt_long(argc, argv, "s:a:q:b:v:w:p:WFAuc:x:y:m:d:i:D:nHh", opts, NULL);
+        int c = getopt_long(argc, argv, "s:a:q:b:v:w:p:WFAuRrc:x:y:m:d:i:D:nHh", opts, NULL);
         if (c == -1) break;
         switch (c) {
             case 's': if (!parse_seed(optarg, &explicit_seed)) { fprintf(stderr, "bad --seed\n"); return 2; } has_seed = true; break;
@@ -620,6 +628,8 @@ int main(int argc, char **argv)
             case 'F': fullscreen = true; all_displays = false; break;
             case 'A': fullscreen = true; all_displays = true; break;
             case 'u': hud = true; break;
+            case 'R': palette_mode = RENDER_PALETTE_RANDOM; break;
+            case 'r': palette_mode = RENDER_PALETTE_RANDOMISH; break;
             case 'c': if (!parse_uint(optarg, &cell_size) || cell_size > 10) { fprintf(stderr, "--cell-size must be 1..10\n"); return 2; } break;
             case 'x': if (!parse_uint(optarg, &width)) { fprintf(stderr, "bad --width\n"); return 2; } break;
             case 'y': if (!parse_uint(optarg, &height)) { fprintf(stderr, "bad --height\n"); return 2; } break;
@@ -682,6 +692,7 @@ int main(int argc, char **argv)
         u->dump_root = dump_root;
         u->headless = headless;
         u->hud_visible = hud;
+        u->palette_mode = palette_mode;
         atomic_init(&u->quit, false);
         atomic_init(&u->done, false);
         /* Deterministic distinct startup seeds; a single window keeps --seed

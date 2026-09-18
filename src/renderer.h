@@ -22,6 +22,20 @@ typedef struct {
 /* Fixed Linux preview palette. Panel drivers supply their own color mapping. */
 extern const uint32_t RENDER_BASE_PALETTE[TURMITE_COLORS];
 
+typedef enum {
+    RENDER_PALETTE_DEFAULT,
+    RENDER_PALETTE_RANDOM,
+    RENDER_PALETTE_RANDOMISH
+} RenderPaletteMode;
+
+/* Generate RGB colors with a private LFSR seeded from the universe.
+ * RANDOM: H spans 360 degrees, S=80%, V=90%.
+ * RANDOMISH: H evenly spans one random 160-degree arc, S=64..96%, V=90%.
+ * Both generated modes use V=20% for color 0, keeping the background dark.
+ * DEFAULT copies RENDER_BASE_PALETTE. Simulation RNG is unaffected. */
+void render_palette_init(uint32_t palette[TURMITE_COLORS],
+                         RenderPaletteMode mode, uint32_t seed);
+
 /* Validate dimensions/storage and return the cell count, or zero on error. */
 size_t render_frame_cells(const RenderFrame *frame);
 
