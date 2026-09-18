@@ -135,7 +135,7 @@ int renderer_init(Renderer *renderer, int width, int height, int cell_size,
     if (!renderer) return -1;
     memset(renderer, 0, sizeof(*renderer));
     if (width <= 0 || height <= 0 || cell_size <= 0 ||
-        width % cell_size || height % cell_size ||
+        width / cell_size == 0 || height / cell_size == 0 ||
         width / cell_size > INT_MAX / (int)sizeof(uint32_t)) return -1;
     const size_t cols = (size_t)(width / cell_size);
     const size_t rows = (size_t)(height / cell_size);
@@ -182,6 +182,7 @@ int renderer_init(Renderer *renderer, int width, int height, int cell_size,
 
     /* renderer->pixels stores packed 0xAARRGGBB words. ARGB8888 matches that
      * integer layout; using RGBA8888 made the 0xFF alpha byte appear as red. */
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0"); /* nearest-neighbor cells */
     renderer->texture = SDL_CreateTexture(renderer->renderer, SDL_PIXELFORMAT_ARGB8888,
         SDL_TEXTUREACCESS_STREAMING, width / cell_size, height / cell_size);
     if (!renderer->texture) goto fail;

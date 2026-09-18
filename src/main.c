@@ -25,7 +25,7 @@
 
 #define DEFAULT_WIDTH 1200
 #define DEFAULT_HEIGHT 800
-#define CELL_SIZE 1
+#define DEFAULT_CELL_SIZE 1
 #define DISPLAY_FRAME_SLOTS 3
 #define CONTROL_QUEUE_SIZE 64
 #define DEFAULT_WORKERS 2
@@ -175,11 +175,11 @@ static void universe_destroy(Universe *u)
 static int universe_init(Universe *u, uint32_t seed)
 {
     u->seed = seed;
-    u->cell_size = CELL_SIZE;
+    if (u->cell_size < 1 || u->cell_size > 10) goto fail;
     u->ready_frame = u->displayed_frame = -1;
     if (pthread_mutex_init(&u->view_lock, NULL) != 0) goto fail;
     u->view_lock_initialized = true;
-    if (world_init(&u->world, u->width, u->height) != 0) goto fail;
+    if (world_init(&u->world, u->width / u->cell_size, u->height / u->cell_size) != 0) goto fail;
     if (ant_colony_init(&u->colony, &u->world) != 0) goto fail;
     universe_seed(u);
     if (scheduler_init(&u->scheduler, &u->colony, SCHED_WFQ, u->quantum) != 0) goto fail;
@@ -280,7 +280,7 @@ typedef struct {
 
 static const OptionHelp option_help[] = {
     {'s', "seed",               "HEX",  "deterministic universe seed"},
-    {'a', "ants",                "N",   "2,4,8,16,32"},
+    {'a', "ants",                "N",   "2-32"},
     {'q', "quantum",             "N",   "maximum instructions per dispatch (1..4096)"},
     {'b', "min-service",         "N",   "minimum normal dispatch batch (default 16)"},
     {'v', "token-rate-divisor",  "N",   "divide all ant token generation rates (default 1)"},
@@ -290,8 +290,9 @@ static const OptionHelp option_help[] = {
     {'F', "fullscreen",          NULL,  "fullscreen on selected monitor"},
     {'A', "fullscreen-all",      NULL,  "fullscreen on every detected monitor"},
     {'u', "hud",                 NULL,  "show developer HUD (hidden by default)"},
-    {'x', "width",               "N",   "windowed/headless universe width (default 1200)"},
-    {'y', "height",              "N",   "windowed/headless universe height (default 800)"},
+    {'c', "cell-size",           "N",   "pixels per cell (1..10, default 1)"},
+    {'x', "width",               "N",   "windowed/headless canvas width (default 1200)"},
+    {'y', "height",              "N",   "windowed/headless canvas height (default 800)"},
     {'m', "minutes",             "N",   "universe lifetime (default 5)"},
     {'d', "dump-pages",          "N",   "retained debug pages: 1,3,7,...,1023 (default 127)"},
     {'i', "dump-interval",       "N",   "seconds between retained pages (default 1)"},
@@ -317,7 +318,7 @@ static void usage(const char *prog)
 
 static bool valid_population(size_t n)
 {
-    return n == 2 || n == 4 || n == 8 || n == 16 || n == 32;
+    return n >= 2 && n <= 32;
 }
 
 static void choose_new_seed(Universe *u)
@@ -615,6 +616,7 @@ int main(int argc, char **argv)
     size_t min_service = DEFAULT_MIN_SERVICE;
     size_t token_rate_divisor = DEFAULT_TOKEN_RATE_DIVISOR;
     size_t workers = DEFAULT_WORKERS;
+    size_t cell_size = DEFAULT_CELL_SIZE;
     size_t width = DEFAULT_WIDTH;
     size_t height = DEFAULT_HEIGHT;
     int display_index = 0;
@@ -641,6 +643,7 @@ int main(int argc, char **argv)
         {"fullscreen", no_argument, NULL, 'F'},
         {"fullscreen-all", no_argument, NULL, 'A'},
         {"hud", no_argument, NULL, 'u'},
+        {"cell-size", required_argument, NULL, 'c'},
         {"width", required_argument, NULL, 'x'},
         {"height", required_argument, NULL, 'y'},
         {"minutes", required_argument, NULL, 'm'},
@@ -654,11 +657,11 @@ int main(int argc, char **argv)
     };
 
     for (;;) {
-        int c = getopt_long(argc, argv, "s:a:q:b:v:w:p:WFAux:y:m:d:i:D:nHh", opts, NULL);
+        int c = getopt_long(argc, argv, "s:a:q:b:v:w:p:WFAuc:x:y:m:d:i:D:nHh", opts, NULL);
         if (c == -1) break;
         switch (c) {
             case 's': if (!parse_seed(optarg, &explicit_seed)) { fprintf(stderr, "bad --seed\n"); return 2; } has_seed = true; break;
-            case 'a': if (!parse_uint(optarg, &ants) || !valid_population(ants)) { fprintf(stderr, "--ants must be 2,4,8,16,32\n"); return 2; } break;
+            case 'a': if (!parse_uint(optarg, &ants) || !valid_population(ants)) { fprintf(stderr, "--ants must be 2-32\n"); return 2; } break;
             case 'q': if (!parse_uint(optarg, &quantum) || quantum < MIN_QUANTUM || quantum > MAX_QUANTUM) { fprintf(stderr, "bad --quantum\n"); return 2; } break;
             case 'b': if (!parse_uint(optarg, &min_service) || min_service < 1 || min_service > MAX_QUANTUM) { fprintf(stderr, "bad --min-service\n"); return 2; } break;
             case 'v': if (!parse_uint(optarg, &token_rate_divisor) || token_rate_divisor > UINT32_MAX) { fprintf(stderr, "bad --token-rate-divisor\n"); return 2; } break;
@@ -668,6 +671,7 @@ int main(int argc, char **argv)
             case 'F': fullscreen = true; all_displays = false; break;
             case 'A': fullscreen = true; all_displays = true; break;
             case 'u': hud = true; break;
+            case 'c': if (!parse_uint(optarg, &cell_size) || cell_size > 10) { fprintf(stderr, "--cell-size must be 1..10\n"); return 2; } break;
             case 'x': if (!parse_uint(optarg, &width)) { fprintf(stderr, "bad --width\n"); return 2; } break;
             case 'y': if (!parse_uint(optarg, &height)) { fprintf(stderr, "bad --height\n"); return 2; } break;
             case 'm': minutes = strtod(optarg, NULL); if (minutes <= 0.0) { fprintf(stderr, "bad --minutes\n"); return 2; } break;
@@ -711,6 +715,7 @@ int main(int argc, char **argv)
             result = 2;
             break;
         }
+        u->cell_size = (int)cell_size;
         u->width = (int)world_width;
         u->height = (int)world_height;
         u->fullscreen = fullscreen;
@@ -731,7 +736,12 @@ int main(int argc, char **argv)
          * exactly. Automatic restarts still use fresh host entropy. */
         uint32_t seed = base_seed ^ (UINT32_C(0x9e3779b9) * (uint32_t)i);
         if (!seed) seed = 1;
-        if (universe_init(u, seed) != 0) { result = 1; break; }
+        if (universe_init(u, seed) != 0) {
+            fprintf(stderr, "failed to initialize display %d: canvas %dx%d, cell size %d\n",
+                    u->display_index, u->width, u->height, u->cell_size);
+            result = 1;
+            break;
+        }
         ++initialized;
     }
     if (!result && headless) {

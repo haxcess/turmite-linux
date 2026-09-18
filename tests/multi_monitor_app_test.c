@@ -14,10 +14,18 @@ static bool closed[2];
 static int created, requested_display, expected_windows;
 static bool close_sent[2];
 static bool expect_windowed, expect_hud;
+static int expected_cell_size;
 
 void __real_renderer_present(Renderer *, const uint32_t *, size_t, const RendererHud *);
 void __wrap_renderer_present(Renderer *renderer, const uint32_t *pixels, size_t cells, const RendererHud *hud)
 {
+    assert(renderer->cell_size == expected_cell_size);
+    assert(cells == (size_t)(renderer->width / expected_cell_size) *
+                    (size_t)(renderer->height / expected_cell_size));
+    int texture_width, texture_height;
+    assert(SDL_QueryTexture(renderer->texture, NULL, NULL, &texture_width, &texture_height) == 0);
+    assert(texture_width == renderer->width / expected_cell_size);
+    assert(texture_height == renderer->height / expected_cell_size);
     assert(renderer->hud_visible == expect_hud);
     assert(hud->visible == expect_hud);
     __real_renderer_present(renderer, pixels, cells, hud);
@@ -106,6 +114,10 @@ static void run_case(bool windowed, int only, bool hud, const char *const *optio
     expected_windows = only < 0 ? 2 : 1;
     char *args[20] = {"turmite", "--dump-pages", "1", "--width", "160", "--height", "120"};
     int argc = 7;
+    expected_cell_size = 1;
+    for (size_t i = 0; options[i]; ++i)
+        if (!strcmp(options[i], "-c") || !strcmp(options[i], "--cell-size"))
+            expected_cell_size = atoi(options[i + 1]);
     for (size_t i = 0; options[i]; ++i) args[argc++] = (char *)options[i];
     args[argc] = NULL;
     optind = 0;
@@ -129,6 +141,30 @@ int main(void)
     run_case(false, -1, false, (const char *[]){"-A", "-p1", NULL});
     run_case(true, 1, false, (const char *[]){"-A", "-p1", "-W", "-u", "-n", NULL});
     run_case(false, 1, false, (const char *[]){"-p1", "-A", "-F", NULL});
+    for (int size = 1; size <= 10; ++size) {
+        char number[4];
+        snprintf(number, sizeof(number), "%d", size);
+        run_case(true, 0, false, (const char *[]){"--cell-size", number, NULL});
+    }
+    run_case(false, -1, false, (const char *[]){"-A", "-c", "3", NULL});
+    run_case(false, 1, false, (const char *[]){"-F", "-p1", "-c", "10", NULL});
+    const char *bad_sizes[] = {"0", "11", "-1", "1.5", "abc"};
+    for (size_t i = 0; i < sizeof(bad_sizes) / sizeof(bad_sizes[0]); ++i) {
+        char *args[] = {"turmite", "--cell-size", (char *)bad_sizes[i], NULL};
+        optind = 0;
+        assert(turmite_application_main(3, args) == 2);
+        assert(SDL_WasInit(SDL_INIT_VIDEO) == 0);
+    }
+    /* Headless capture and world storage must use the same reduced dimensions. */
+    Universe headless = {0};
+    headless.width = 161; headless.height = 121; headless.cell_size = 10;
+    headless.headless = true; headless.workers = 1; headless.initial_ants = 2;
+    headless.quantum = 32; headless.min_service = 16; headless.token_rate_divisor = 1;
+    headless.dump_pages = 1; headless.dump_interval = 1;
+    assert(universe_init(&headless, 123) == 0);
+    assert(headless.world.width == 16 && headless.world.height == 12);
+    assert(headless.colony.occupancy_cells == 192 && headless.dump.cells == 192);
+    universe_destroy(&headless);
     alarm(0);
     puts("multi-monitor app ok: defaults, HUD flags, fullscreen modes, option precedence, main-thread SDL, shutdown");
     return 0;

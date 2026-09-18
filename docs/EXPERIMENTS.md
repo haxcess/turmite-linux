@@ -1,73 +1,8 @@
-# Experiments with the current prototype
+# Experiments
 
-Use explicit dimensions, seed, worker count, and batching settings when comparing runs. Identical seeds do not guarantee identical worlds: timing affects scheduling, tokens, and collisions, including with one worker.
+Record revision, compiler, CPU, dimensions, seed, workers, and command. Repeat measurements: identical seeds do not reproduce timing, even with one worker.
 
-## Multiple monitors
-
-```sh
-./turmite --dump-pages 7                  # one normal window on display 0, HUD hidden
-./turmite --fullscreen-all --dump-pages 7 # independent fullscreen universes on all monitors
-./turmite --fullscreen --display 1 --hud --dump-pages 7 # fullscreen on monitor 1 with HUD
-make multi-window-test
-```
-
-Each universe has its own controller and `--workers` ant threads. Focus a window and test pause, HUD toggle, restart, and close while watching the others continue. Discovery happens at startup. The automated tests use dummy video and simulated monitor enumeration; verify placement and fullscreen behavior on a real multi-monitor desktop. Controlled comparisons below select one display explicitly.
-
-## Quantum and batching
-
-These windowed runs keep dimensions and normal batching fixed while varying the maximum grant:
-
-```sh
-./turmite --display 0 --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 1
-./turmite --display 0 --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 8
-./turmite --display 0 --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 64
-./turmite --display 0 --windowed --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 256
-```
-
-The effective minimum is `min(min_service, quantum, floor(token_capacity))`. Repeat with `--min-service 1` to isolate unbatched behavior. Watch collisions and visible structure; raw instruction throughput alone does not describe the artwork.
-
-For slow, bursty motion:
-
-```sh
-./turmite --display 0 --windowed --width 600 --height 400 --dump-pages 7 --token-rate-divisor 100 --quantum 64 --min-service 32
-```
-
-The divisor changes accrual; minimum service changes burst release. Initial, cloned, and mutated ants still receive full buckets, so slow accrual does not remove their initial burst.
-
-## Population and lifecycle
-
-- `+` / `=` requests doubling to at most 32. Clones inherit phenotype and begin with full buckets at random empty positions.
-- `-` requests halving by stopping token generation for weak eligible ants. Leases and reincarnation can affect whether one request reaches the target.
-- `SPACE` pauses new dispatches, but not lifecycle time, capture, or already leased work.
-- `R` clears and reseeds the universe. `--minutes 0.25` exercises the same restart lifecycle every 15 seconds; it does not exit the process.
-- `H` toggles the HUD. There are no ant labels on the world.
-
-Collision counts report newly marked losers. A loser stops at an instruction boundary, pauses for 50 ms, and gets one rule-field edit before reclaiming its cell. HALT generates a fresh random rule/phenotype instead. Run `make mutation-test` for deterministic lifecycle checks and concurrent stress; see [SPEC.md](SPEC.md).
-
-## Fixed-palette display and logical captures
-
-Linux displays the logical tape using a fixed six-color palette. There is no drift or per-write ink history; unchanged logical cells retain the same visible color regardless of age. Use `R` to verify that the next frame reflects a fresh universe without retained visual trails.
-
-Use `Q` to write a capture and inspect logical cells independently of the window:
-
-```sh
-./turmite --headless --width 300 --height 200 --seed 0x12345678 --dump-pages 31 --dump-interval 0.5
-# Type Q followed by Enter to dump and exit.
-python3 tools/analyze_dump.py ./turmite-dumps/tape-SEED-TIMESTAMP --page 0
-```
-
-Substitute the actual capture directory. Raw dump bytes use the same row-major indices as `RenderFrame`, so they can be mapped through the fixed palette. The analyzer reports statistics; it does not display images. Live captures are non-transactional observations; repeating hashes suggest sampled tape repetition, not deterministic full-state cycles. Avoid capacity 1 for change-count experiments because its previous page is overwritten before comparison.
-
-```sh
-make render-test
-make sdl-test
-```
-
-The first validates portable RGB and custom display-code mappings with no SDL dependency. The second reads pixels back from SDL's dummy video/software renderer, including after a cleared frame. Neither requires a selected e-ink panel or validates panel refresh behavior.
-
-## Scheduler fragmentation and saturation
-
-Build the standalone benchmark, then compare one variable at a time:
+## Batching and contention
 
 ```sh
 make tests/bench
@@ -77,15 +12,37 @@ make tests/bench
 ./tests/bench 32 256 10 2 1 16
 ```
 
-The first pair compares batching, the next changes token supply, and the final run compares two workers at normal rates. Watch `avg_exec_per_dispatch`, `avg_grant`, `empty_scans`, and `idle_waits`. Tiny grants with few empty scans indicate fragmentation rather than workers repeatedly finding no eligible work.
+Compare batching, rate saturation, then worker count. Inspect `avg_exec_per_dispatch`, `avg_grant`, `empty_scans`, `idle_waits`. Tiny grants with few empty scans indicate fragmentation. Saturation also changes collision health.
 
-Equivalent profiling targets include:
+Equivalent perf targets: `perf-stat-unbatched`, `perf-stat-1w`, `perf-stat-saturated`, `perf-stat`. See [benchmark reference](MEMORY_AND_PERF.md).
+
+## Visual batches
 
 ```sh
-make perf-stat-unbatched
-make perf-stat-1w
-make perf-stat-saturated
-make perf-stat
+./turmite -W -p 0 --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 64
 ```
 
-Record compiler, CPU, worker count, and command with results. Saturation changes the workload's token health as well as dispatch behavior. See [MEMORY_AND_PERF.md](MEMORY_AND_PERF.md) for benchmark defaults, output files, and memory costs.
+Repeat with quantum 2, 8, 64, 256; then minimum service 1. For slow bursts, use `--token-rate-divisor 100 --quantum 64 --min-service 32`. Startup, clones, and HALT rebirth receive full buckets; collision mutation preserves balance.
+
+## Manual checks
+
+| Setup / action | Check |
+| --- | --- |
+| `./turmite -A --dump-pages 7` | One fullscreen universe per physical monitor |
+| `./turmite -F -p 1 -u --dump-pages 7` | Selected monitor and HUD |
+| Focus one window; Space, H, R, Esc | Controls and close remain local |
+| `+`, `-` | Best-effort cloning and drain retirement |
+| `--minutes 0.25` | Restart every 15 seconds; process continues |
+| R | Fresh tape, no retained visual history |
+
+Automated dummy-video coverage: `make multi-window-test`. Lifecycle/mutation coverage: `make mutation-test`.
+
+## Capture
+
+```sh
+./turmite --headless --width 300 --height 200 --seed 0x12345678 --dump-pages 31 --dump-interval 0.5
+# Q then Enter
+python3 tools/analyze_dump.py ./turmite-dumps/tape-SEED-TIMESTAMP --page 0
+```
+
+Use the actual output directory. [Dump limitations](DEBUGGING.md) apply; repeating tape hashes do not establish full-state cycles.

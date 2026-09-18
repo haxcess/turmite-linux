@@ -1,48 +1,39 @@
-# Development and validation
+# Development
 
-Run commands from the repository root; source paths below are relative to that root.
+## Checks
 
-## Validation and profiling
-
-```sh
-make core-test
-make mutation-test
-make mutation-tsan-test
-make render-test
-make sdl-test
-make multi-window-test
-make tsan-test
-make struct-report
-make bench
-make perf-stat
-```
-
-`core-test` runs the smoke, batch-capacity, and deterministic mutation tests. `mutation-test` also runs concurrent stress with eight workers; `mutation-tsan-test` runs that stress under ThreadSanitizer. The smoke test checks population and final occupancy consistency after a short two-worker run. `render-test` checks six-color conversion, a custom panel-code mapping, snapshot isolation, and buffer validation without SDL. `sdl-test` checks actual pixel readback through SDL's dummy video/software renderer. `multi-window-test` checks independent controls, restart, frame ownership, and closing one window while another continues; a second test simulates two detected monitors through the real application entry point. These use SDL dummy video, not physical monitors. ThreadSanitizer requires a supported compiler/runtime. Core tests and the benchmark do not need SDL; the main application still links SDL even in headless mode. The default application and benchmark builds use `-O2 -g`.
-
-For controlled benchmark comparisons, see [EXPERIMENTS.md](EXPERIMENTS.md). Profiling targets require Linux `perf` and permission to use performance counters. The checked-in `perf-*.txt` reports are historical artifacts, not current throughput guarantees.
-
-## Project map and STM32 status
-
-| Path | Responsibility |
+| Command | Coverage |
 | --- | --- |
-| `src/rules.c`, `src/ant.c` | Rule catalogue, interpreter, mutation, occupancy operations |
-| `src/scheduler.c` | WFQ-like selection, tokens, leases, population controls, pthread synchronization |
-| `src/world.c` | Logical tape and allocation |
-| `src/renderer.c`, `src/renderer.h` | Portable six-color frame and color conversion |
-| `src/main.c` | Monitor discovery, independent controllers/workers, frame handoff, SDL event routing |
-| `src/renderer_sdl.c`, `src/renderer_sdl.h` | SDL windows, prepared-pixel presentation, developer HUD |
-| `src/dump.c`, `tools/analyze_dump.py` | Logical-world capture and offline inspection |
-| `rule-lab.html`, `tools/rule-*.js` | Offline single-ant rule editor, seeded generator, and C export |
-| `turmite-ruleTesting.html` | Historical visual playground; its rules differ from the C catalogue |
-| `stm32/` | Proposed dual-core design and occupancy helper scaffold |
+| `make core-test` | Two-worker smoke, final occupancy/population, capacity regression, deterministic mutation |
+| `make capacity-test` | Dispatch thresholds and draining exemption |
+| `make mutation-test` | Collision recovery, blocked residency, HALT, clone isolation; eight-worker stress with population changes/captures |
+| `make mutation-tsan-test` | Mutation stress under ThreadSanitizer |
+| `make tsan-test` | Core smoke under ThreadSanitizer |
+| `make render-test` | Six-color/code conversion, stable snapshots, invalid buffers |
+| `make sdl-test` | Dummy-video/software pixel readback and cleared frames |
+| `make multi-window-test` | Frame handoff, controls, restart, close isolation, simulated monitor enumeration |
+| `make rule-catalog` | Regenerate browser catalogue/palette |
+| `make rule-lab-test` | C/JS traces and generated C entries; requires Node.js |
+| `make struct-report` | Host ABI sizes |
+| `make bench`, `make perf-stat` | Throughput and hardware counters |
 
-The existing STM32 design targets H745/H747 with one worker per core and separate FreeRTOS instances. No board, specific panel, Cube project, linker setup, or complete firmware build is present. The display target is six-color e-ink, roughly 8×6 inches; controller, pixel resolution, interface, and refresh requirements remain open. The shared rendering layer is ready for a panel backend, but no e-ink driver is implemented. See [stm32/README.md](stm32/README.md) and [stm32/INTEGRATION.md](stm32/INTEGRATION.md).
+Core tests/benchmark need no SDL; the main executable links SDL even in headless mode. TSAN requires a supported runtime. `perf` requires counter permissions. Default application/benchmark flags: `-O2 -g`. Dummy-video tests do not validate physical monitor placement or e-ink hardware.
 
-[OPTIMIZATION_NOTES.md](history/OPTIMIZATION_NOTES.md) preserves optimization history; [OPTIMIZATION_QUEUE.md](OPTIMIZATION_QUEUE.md) lists remaining work.
+## Source map
 
-## Change workflow
+| Path | Role |
+| --- | --- |
+| `src/rules.c`, `src/ant.c` | Catalogue, interpreter, mutation, occupancy |
+| `src/scheduler.c` | Credit, tokens, leases, recovery, population, pthread synchronization |
+| `src/world.c`, `src/rng.c` | Tape allocation and random streams |
+| `src/renderer.{h,c}` | Portable frame conversion |
+| `src/main.c` | Controllers, lifecycle, monitors, frame handoff, event routing |
+| `src/renderer_sdl.{h,c}` | SDL windows, presentation, HUD |
+| `src/dump.c`, `tools/analyze_dump.py` | Captures and analysis |
+| `rule-lab.html`, `tools/rule-*.js` | Rule editor, generator, catalogue |
+| `stm32/` | Unintegrated occupancy/port scaffold |
 
-Changes can be delivered as Git patch files for manual review and application. From the repository root:
+## Manual patches
 
 ```sh
 git apply --stat /path/to/change.patch
@@ -52,8 +43,6 @@ git diff --check
 git diff
 ```
 
-Applying a patch changes working files; it does not stage, commit, or publish them. Publishing to GitHub is a manual maintainer step.
+Stage, commit, and publish manually.
 
-## Rule catalogue validation
-
-After editing rules or the preview palette, run `make rule-catalog` to refresh the browser data, then `make rule-lab-test` to compare JavaScript execution with C traces and compile generated C entries. The latter requires Node.js (`NODE` can override its command). `make capacity-test` runs the scheduling regression separately. See the [rule lab guide](RULE_LAB.md) for authoring and export details.
+[Experiments](EXPERIMENTS.md) · [Profiling](MEMORY_AND_PERF.md) · [Porting](stm32/INTEGRATION.md)

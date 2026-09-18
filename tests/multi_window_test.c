@@ -22,6 +22,7 @@ static void init_test_universe(Universe *u, int width, int height, uint32_t seed
     u->hud_visible = false;
     atomic_init(&u->quit, false);
     atomic_init(&u->done, false);
+    u->cell_size = 1;
     assert(universe_init(u, seed) == 0);
 }
 

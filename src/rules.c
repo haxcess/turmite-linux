@@ -155,6 +155,97 @@ static const TurmiteRule RULES[] = {
         { A(2, TURN_B, 0), A(0, TURN_L, 0), A(0, TURN_R, 1) },
         { A(2, TURN_F, 2), A(2, TURN_B, 1), A(1, TURN_F, 1) }
         }
+    },
+    {
+        "mutant_bcff52d4", "Mutant bcff52d4", 3, 4,
+        {
+        { A(2, TURN_B, 0), A(0, TURN_L, 0), A(3, TURN_R, 2), A(2, TURN_L, 2) },
+        { A(1, TURN_L, 0), A(0, TURN_B, 1), A(2, TURN_N, 2), A(3, TURN_F, 1) },
+        { A(3, TURN_B, 2), A(2, TURN_R, 0), A(2, TURN_F, 0), A(1, TURN_B, 1) }
+        }
+    },
+    {
+        "novel_a40f7c4a", "RedRum", 2, 5,
+        {
+        { A(2, TURN_F, 1), A(4, TURN_R, 0), A(1, TURN_B, 1), A(1, TURN_N, 0), A(3, TURN_B, 1) },
+        { A(2, TURN_E, 1), A(2, TURN_H, 1), A(1, TURN_B, 0), A(0, TURN_S, 1), A(0, TURN_F, 1) }
+        }
+    },
+    {
+        "mutant_36d2f093", "RedArmy", 2, 5,
+        {
+        { A(2, TURN_F, 1), A(4, TURN_R, 0), A(1, TURN_B, 1), A(1, TURN_N, 0), A(3, TURN_B, 1) },
+        { A(2, TURN_E, 1), A(2, TURN_H, 1), A(1, TURN_B, 0), A(0, TURN_S, 1), A(0, TURN_N, 1) }
+        }
+    },
+    {
+        "mutant_48616bab", "RedGreen Handy", 2, 5,
+        {
+        { A(4, TURN_F, 1), A(4, TURN_R, 0), A(1, TURN_B, 1), A(1, TURN_N, 0), A(3, TURN_B, 1) },
+        { A(2, TURN_E, 1), A(2, TURN_H, 1), A(1, TURN_S, 0), A(0, TURN_S, 1), A(0, TURN_N, 1) }
+        }
+    },
+    {
+        "mutant_f1ab6bf2", "Alien Words", 2, 5,
+        {
+        { A(4, TURN_B, 1), A(4, TURN_R, 0), A(1, TURN_B, 1), A(1, TURN_N, 0), A(3, TURN_B, 1) },
+        { A(2, TURN_E, 1), A(2, TURN_W, 1), A(1, TURN_S, 0), A(0, TURN_S, 1), A(0, TURN_N, 1) }
+        }
+    },
+    {
+        "mutant_9f1b1831", "Alien Sands", 2, 5,
+        {
+        { A(4, TURN_B, 1), A(4, TURN_R, 0), A(1, TURN_S, 1), A(1, TURN_S, 0), A(3, TURN_R, 1) },
+        { A(2, TURN_E, 1), A(2, TURN_E, 1), A(1, TURN_H, 0), A(0, TURN_E, 1), A(0, TURN_N, 1) }
+        }
+    },
+    {
+        "mutant_8e1a2aba", "Mutant Transistor", 1, 6,
+        {
+        { A(1, TURN_W, 0), A(2, TURN_B, 0), A(3, TURN_N, 0), A(4, TURN_R, 0), A(5, TURN_W, 0), A(0, TURN_W, 0) }
+        }
+    },
+    {
+        "mutant_1da977cd", "Mutant 1da977cd", 1, 6,
+        {
+        { A(1, TURN_B, 0), A(2, TURN_B, 0), A(3, TURN_N, 0), A(4, TURN_R, 0), A(5, TURN_W, 0), A(0, TURN_L, 0) }
+        }
+    },
+    {
+        "mutant_5aef2e66", "Mutant 5aef2e66", 1, 6,
+        {
+        { A(1, TURN_B, 0), A(2, TURN_B, 0), A(3, TURN_N, 0), A(4, TURN_R, 0), A(5, TURN_L, 0), A(0, TURN_L, 0) }
+        }
+    },
+    {
+        "mutant_wormtrails", "Worm Poop", 2, 2,
+        {
+        { A(1, TURN_R, 1), A(1, TURN_L, 1) },
+        { A(1, TURN_R, 1), A(0, TURN_L, 0) }
+        }
+    },
+    {
+        "mutant_49f77555", "Mutant 49f77555", 3, 3,
+        {
+        { A(1, TURN_L, 0), A(0, TURN_B, 1), A(2, TURN_E, 0) },
+        { A(1, TURN_L, 1), A(2, TURN_R, 0), A(2, TURN_F, 1) },
+        { A(2, TURN_W, 1), A(2, TURN_W, 1), A(0, TURN_F, 1) }
+        }
+    },
+    {
+        "mutant_1cc358d", "Mutant 1cc358d", 3, 3,
+        {
+        { A(1, TURN_L, 0), A(0, TURN_L, 1), A(2, TURN_L, 0) },
+        { A(1, TURN_L, 1), A(2, TURN_R, 0), A(2, TURN_F, 1) },
+        { A(2, TURN_W, 1), A(2, TURN_W, 1), A(0, TURN_L, 1) }
+        }
+    },
+    {
+        "mutant_3d099bfe", "Eww gross yuk", 2, 2,
+        {
+        { A(0, TURN_R, 1), A(0, TURN_L, 0) },
+        { A(1, TURN_L, 1), A(1, TURN_B, 0) }
+        }
     }
 };
 

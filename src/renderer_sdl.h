@@ -36,6 +36,7 @@ typedef struct {
 int renderer_display_count(void);
 void renderer_shutdown(void);
 int renderer_display_size(int display_index, int *width, int *height);
+/* Width/height are output pixels; texture dimensions use floor(pixels/cell_size). */
 int renderer_init(Renderer *renderer, int width, int height, int cell_size,
                   bool hud_visible, int display_index, bool fullscreen);
 void renderer_destroy(Renderer *renderer);

@@ -1,0 +1,4 @@
+# Toolchain image contains no application source, credentials, or build products.
+**
+!Dockerfile
+!container-entrypoint.sh
