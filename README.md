@@ -21,9 +21,10 @@ Default: one 1200 × 800 window on display 0, HUD hidden. **Esc** closes a windo
 | `-p N` | Select display for single-window modes |
 | `-u` | Show HUD |
 | `-c N`, `--cell-size N` | Pixels per cell (1–10); preserves window dimensions |
-| `--ants N`, `--workers N` | Population and workers per universe |
+| `--ants N`, `--workers N` | Population per universe; process-wide workers |
 | `--quantum N`, `--min-service N` | Execution batch limits |
 | `-v N` | Token refill divisor |
 | `--minutes N` | Universe restart interval |
 
 [Options and controls](docs/RUNNING.md) · [Technical documentation](docs/README.md) · [Rule lab](rule-lab.html) ([guide](docs/RULE_LAB.md))
+[Video Example](https://www.youtube.com/watch?v=GZKU-f88IsI)

@@ -19,7 +19,7 @@ make
 | `-q`, `--quantum N` | 30; 2–4096 |
 | `-b`, `--min-service N` | 16; 1–4096 |
 | `-v`, `--token-rate-divisor N` | 1; positive 32-bit divisor |
-| `-w`, `--workers N` | 2 per universe; 1–8 |
+| `-w`, `--workers N` | 2 process-wide; 1–8 |
 | `-p`, `--display N` | 0; single-window display index |
 | `-W`, `--windowed` | Default: one normal window |
 | `-F`, `--fullscreen` | Fullscreen on selected display |
@@ -67,7 +67,7 @@ Keys affect the focused universe.
 | `+` / `=` | Request doubling, capped at 32 |
 | R | Clear and reseed |
 | H | Toggle HUD |
-| Q | Stop workers, capture final page, write dump, close window |
+| Q | Drain this universe’s leases, capture final page, write dump, close window |
 | Esc / window close | Close without dump |
 
 Headless: `Q`/`q` then Enter dumps and exits. Closing one window leaves others running; last close exits. SDL application quit closes all.

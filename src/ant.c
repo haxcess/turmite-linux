@@ -44,16 +44,11 @@ static inline size_t occupancy_index(const AntColony *colony, uint32_t x, uint32
 
 /* Each ant owns a private Galois LFSR stream, avoiding contention on the
  * universe RNG during mutation and lifecycle operations. */
-static uint32_t ant_rng_next(uint32_t *state)
-{
-    *state = lfsr32_advance(*state);
-    return *state;
-}
-
 static uint32_t ant_rng_uniform(uint32_t *state, uint32_t limit)
 {
     if (limit <= 1u) return 0u;
-    return ant_rng_next(state) % limit;
+    *state = lfsr32_advance(*state);
+    return *state % limit;
 }
 
 /* Scheduler parameters are part of the ant's mutable phenotype: rate controls

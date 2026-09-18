@@ -12,7 +12,7 @@ Per universe: `N = logical_width × logical_height` (canvas dimensions divided b
 | Three ARGB frames | 12N | No |
 | Capture ring | PN | Yes |
 
-Core: `2N`. Graphical application: `(15 + P)N`. Headless application: `(2 + P)N`. Excludes SDL resources, metadata, stacks, allocator overhead. Sum across universes. Standalone benchmark/smoke omit captures and rendering.
+Core: `2N`. Graphical application: `(15 + P)N`. Headless application: `(2 + P)N`. Excludes SDL resources, metadata, stacks, allocator overhead. Sum across universes; worker stacks belong to one process-wide pool. Standalone benchmark/smoke omit captures and rendering.
 
 | Dimensions | Core bytes | Default ring bytes (P=127) |
 | --- | ---: | ---: |
@@ -44,6 +44,8 @@ make tests/bench
 ```
 
 Defaults: `32 256 3 2 1 16`; 300 × 200 world; seed `0x12345678`; initial rules by ant index; 1–64 workers. Exits after SECONDS, unlike application restart intervals.
+
+The benchmark uses the standalone single-universe scheduler. In the graphical application, dispatch/grant counters remain per universe; idle/empty counters count unsuccessful global scans while that universe is registered. Dump/HUD worker count is shared pool capacity.
 
 Reports total instructions, dispatches, average execution/grant, empty scans, idle waits, collisions, population, and configuration. Smoke-test instruction output counts only ant 0. Rate scaling changes collision health and workload as well as dispatch supply.
 

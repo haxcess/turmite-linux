@@ -114,95 +114,140 @@ static void recover_ant(Scheduler *scheduler, Ant *ant, uint64_t now_us)
     }
 }
 
+/* Caller holds this scheduler's lock. Selection updates eligible-ant credit,
+ * but does not lease anything until the process-wide winner is known. */
+static Ant *candidate_locked(Scheduler *scheduler, uint64_t now_us, double *score)
+{
+    if (scheduler->stopping) return NULL;
+    for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i)
+        recover_ant(scheduler, &scheduler->colony->ants[i], now_us);
+    if (atomic_load_explicit(&scheduler->paused, memory_order_acquire)) return NULL;
+    Ant *best = NULL;
+    double best_score = -DBL_MAX;
+
+    /* One WFQ-like scan updates each eligible ant's credit by its weight,
+     * then chooses the largest accumulated credit. Completed work is
+     * subtracted on release, so repeatedly served ants fall behind peers. */
+    for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
+        Ant *ant = &scheduler->colony->ants[i];
+        uint32_t f = flags_load(ant);
+        if (!(f & ANT_F_ENABLED) || (f & (ANT_F_LEASED | ANT_F_CLOBBERED | ANT_F_EXPIRED | ANT_F_DISPLACED))) continue;
+
+        accrue_tokens(scheduler, i, ant, now_us);
+        retire_draining(ant, scheduler->colony);
+        if (!runnable(ant)) continue;
+
+        const uint32_t tokens_fp = atomic_load_explicit(&ant->tokens_fp, memory_order_relaxed);
+        const uint32_t whole_tokens = tokens_fp >> TOKEN_FP_SHIFT;
+        if (whole_tokens == 0) continue;
+
+        /* Batch normal service so low token rates do not turn into millions
+         * of 1-3 instruction dispatches. This changes burstiness, not the
+         * long-term token rate. Draining ants bypass batching so halving can
+         * consume their final tokens and complete. */
+        const size_t q = atomic_load_explicit(&scheduler->quantum, memory_order_relaxed);
+        size_t required = atomic_load_explicit(&scheduler->min_service, memory_order_relaxed);
+        if (required == 0) required = 1;
+        if (required > q) required = q;
+        /* A full bucket must always be eligible for normal service. */
+        const size_t capacity = atomic_load_explicit(&ant->token_capacity_fp,
+                                                     memory_order_relaxed) >> TOKEN_FP_SHIFT;
+        if (required > capacity) required = capacity;
+        if (!(f & ANT_F_DRAINING) && whole_tokens < required) continue;
+
+        uint32_t weight = atomic_load_explicit(&ant->weight, memory_order_relaxed);
+        if (weight == 0) weight = 1;
+        scheduler->fair_credit[i] += (double)weight;
+
+        double score = scheduler->fair_credit[i];
+        if (score > best_score || (score == best_score && (!best || i < (size_t)(best - scheduler->colony->ants)))) {
+            best = ant;
+            best_score = score;
+        }
+    }
+
+    if (best && score) *score = best_score;
+    return best;
+}
+
+static Ant *lease_locked(Scheduler *scheduler, Ant *ant, size_t *granted_quantum)
+{
+    size_t grant = atomic_load_explicit(&scheduler->quantum, memory_order_relaxed);
+    if (!grant) grant = 1;
+    size_t whole = atomic_load_explicit(&ant->tokens_fp, memory_order_relaxed) >> TOKEN_FP_SHIFT;
+    if (grant > whole) grant = whole;
+    atomic_fetch_or_explicit(&ant->flags, ANT_F_LEASED, memory_order_acq_rel);
+    atomic_fetch_add_explicit(&scheduler->dispatches, 1u, memory_order_relaxed);
+    atomic_fetch_add_explicit(&scheduler->granted_instructions, grant, memory_order_relaxed);
+    if (granted_quantum) *granted_quantum = grant;
+    return ant;
+}
+
 Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us, size_t *granted_quantum)
 {
     pthread_mutex_lock(&scheduler->lock);
-
     while (!scheduler->stopping) {
-        for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
-            recover_ant(scheduler, &scheduler->colony->ants[i], now_us);
-        }
-
-        if (atomic_load_explicit(&scheduler->paused, memory_order_acquire)) {
-            pthread_cond_wait(&scheduler->work_available, &scheduler->lock);
-            now_us = monotonic_us();
-            continue;
-        }
-
-        Ant *best = NULL;
-        double best_score = -DBL_MAX;
-
-        /* One WFQ-like scan updates each eligible ant's credit by its weight,
-         * then chooses the largest accumulated credit. Completed work is
-         * subtracted on release, so repeatedly served ants fall behind peers. */
-        for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
-            Ant *ant = &scheduler->colony->ants[i];
-            uint32_t f = flags_load(ant);
-            if (!(f & ANT_F_ENABLED) || (f & (ANT_F_LEASED | ANT_F_CLOBBERED | ANT_F_EXPIRED | ANT_F_DISPLACED))) continue;
-
-            accrue_tokens(scheduler, i, ant, now_us);
-            retire_draining(ant, scheduler->colony);
-            if (!runnable(ant)) continue;
-
-            const uint32_t tokens_fp = atomic_load_explicit(&ant->tokens_fp, memory_order_relaxed);
-            const uint32_t whole_tokens = tokens_fp >> TOKEN_FP_SHIFT;
-            if (whole_tokens == 0) continue;
-
-            /* Batch normal service so low token rates do not turn into millions
-             * of 1-3 instruction dispatches. This changes burstiness, not the
-             * long-term token rate. Draining ants bypass batching so halving can
-             * consume their final tokens and complete. */
-            const size_t q = atomic_load_explicit(&scheduler->quantum, memory_order_relaxed);
-            size_t required = atomic_load_explicit(&scheduler->min_service, memory_order_relaxed);
-            if (required == 0) required = 1;
-            if (required > q) required = q;
-            /* A full bucket must always be eligible for normal service. */
-            const size_t capacity = atomic_load_explicit(&ant->token_capacity_fp,
-                                                         memory_order_relaxed) >> TOKEN_FP_SHIFT;
-            if (required > capacity) required = capacity;
-            if (!(f & ANT_F_DRAINING) && whole_tokens < required) continue;
-
-            uint32_t weight = atomic_load_explicit(&ant->weight, memory_order_relaxed);
-            if (weight == 0) weight = 1;
-            scheduler->fair_credit[i] += (double)weight;
-
-            double score = scheduler->fair_credit[i];
-            if (score > best_score || (score == best_score && (!best || i < (size_t)(best - scheduler->colony->ants)))) {
-                best = ant;
-                best_score = score;
-            }
-        }
-
+        Ant *best = candidate_locked(scheduler, now_us, NULL);
         if (best) {
-            size_t grant = scheduler->quantum ? atomic_load_explicit(&scheduler->quantum, memory_order_relaxed) : 1u;
-            uint32_t whole_tokens = atomic_load_explicit(&best->tokens_fp, memory_order_relaxed) >> TOKEN_FP_SHIFT;
-            if (whole_tokens == 0) {
-                pthread_mutex_unlock(&scheduler->lock);
-                continue;
-            }
-            if (grant > (size_t)whole_tokens) grant = (size_t)whole_tokens;
-            atomic_fetch_or_explicit(&best->flags, ANT_F_LEASED, memory_order_acq_rel);
-            atomic_fetch_add_explicit(&scheduler->dispatches, 1u, memory_order_relaxed);
-            atomic_fetch_add_explicit(&scheduler->granted_instructions, grant, memory_order_relaxed);
-            if (granted_quantum) *granted_quantum = grant;
+            lease_locked(scheduler, best, granted_quantum);
             pthread_mutex_unlock(&scheduler->lock);
             return best;
         }
-
-        /* Nothing has enough service budget. Sleep briefly instead of spinning;
-         * token accrual is derived from time, so no periodic tick is required. */
-        atomic_fetch_add_explicit(&scheduler->empty_scans, 1u, memory_order_relaxed);
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        ts.tv_nsec += 1000000L;
-        if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
-        atomic_fetch_add_explicit(&scheduler->idle_waits, 1u, memory_order_relaxed);
-        pthread_cond_timedwait(&scheduler->work_available, &scheduler->lock, &ts);
+        if (atomic_load_explicit(&scheduler->paused, memory_order_acquire)) {
+            pthread_cond_wait(&scheduler->work_available, &scheduler->lock);
+        } else {
+            atomic_fetch_add_explicit(&scheduler->empty_scans, 1u, memory_order_relaxed);
+            atomic_fetch_add_explicit(&scheduler->idle_waits, 1u, memory_order_relaxed);
+            struct timespec ts;
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            ts.tv_nsec += 1000000L;
+            if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+            pthread_cond_timedwait(&scheduler->work_available, &scheduler->lock, &ts);
+        }
         now_us = monotonic_us();
     }
-
     pthread_mutex_unlock(&scheduler->lock);
     return NULL;
+}
+
+/* Nonblocking selection across every attached universe. Membership/lifetime
+ * belong to the caller. Entries must be distinct; NULL entries are suspended.
+ * Lock order is registration order, matching every group acquisition. */
+Ant *scheduler_acquire_group(Scheduler *const *members, size_t count,
+                             uint64_t now_us, size_t *selected, size_t *grant)
+{
+    for (size_t i = 0; i < count; ++i)
+        if (members[i]) pthread_mutex_lock(&members[i]->lock);
+    Ant *best = NULL;
+    double best_score = -DBL_MAX;
+    size_t winner = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (!members[i]) continue;
+        double score = 0;
+        Ant *candidate = candidate_locked(members[i], now_us, &score);
+        if (candidate && (!best || score > best_score)) {
+            best = candidate; best_score = score; winner = i;
+        }
+    }
+    if (best) {
+        /* Credit is relative. Recenter the shared domain so newly registered
+         * universes start near current service, not behind years of credit. */
+        for (size_t i = 0; i < count; ++i) if (members[i] &&
+            !atomic_load_explicit(&members[i]->paused, memory_order_relaxed) &&
+            !members[i]->stopping)
+            for (size_t j = 0; j < TURMITE_MAX_ANTS; ++j)
+                members[i]->fair_credit[j] -= best_score;
+        lease_locked(members[winner], best, grant);
+        if (selected) *selected = winner;
+    } else {
+        for (size_t i = 0; i < count; ++i) if (members[i]) {
+            atomic_fetch_add_explicit(&members[i]->empty_scans, 1u, memory_order_relaxed);
+            atomic_fetch_add_explicit(&members[i]->idle_waits, 1u, memory_order_relaxed);
+        }
+    }
+    for (size_t i = count; i > 0; --i)
+        if (members[i-1]) pthread_mutex_unlock(&members[i-1]->lock);
+    return best;
 }
 
 void scheduler_release(Scheduler *scheduler, Ant *ant, size_t executed, uint64_t now_us)
