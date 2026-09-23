@@ -72,8 +72,37 @@ static void *fast_frames(void *arg)
     return NULL;
 }
 
+static void glitter_regression(void)
+{
+    Universe u = {0};
+    u.seed = 123;
+    assert(world_init(&u.world, 160, 120) == 0);
+    uint8_t snapshot[160 * 120];
+    size_t previous = 0;
+    for (unsigned density = 0; density <= 10; ++density) {
+        u.glitter_density = density;
+        world_clear(&u.world);
+        universe_glitter(&u);
+        size_t count = 0;
+        for (size_t i = 0; i < u.world.cells; ++i) {
+            snapshot[i] = world_load(&u.world, i);
+            assert(snapshot[i] < TURMITE_COLORS);
+            count += snapshot[i] != 0;
+        }
+        assert(density ? count > previous : count == 0);
+        previous = count;
+        world_clear(&u.world);
+        universe_glitter(&u);
+        for (size_t i = 0; i < u.world.cells; ++i)
+            assert(snapshot[i] == world_load(&u.world, i));
+    }
+    world_destroy(&u.world);
+    puts("glitter ok: zero density, increasing coverage, valid colors, seeded repeatability");
+}
+
 int main(void)
 {
+    glitter_regression();
     assert(renderer_display_count() >= 1);
     Universe u[2];
     init_test_universe(&u[0], 160, 120, 0x12345678);

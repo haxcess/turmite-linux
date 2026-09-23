@@ -25,6 +25,7 @@ int main(void)
             rng_seed(&rng,123);
             Ant *ant=&colony.ants[0];
             ant_randomize(ant,&colony,&w,&rng,rule);
+            atomic_store(&ant->color_offset,0);
             ant_release_occupancy(ant,&colony);
             atomic_store(&colony.positions[0],(24u<<16)|32u);
             atomic_store(&colony.occupancy[24*64+32],1);

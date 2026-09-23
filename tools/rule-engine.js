@@ -65,7 +65,7 @@
       if (!Number.isInteger(count) || count < 0 || count > 1000000) throw Error("Invalid step count.");
       for (let i = 0; i < count && !this.halted; i++) {
         const index = this.y * this.width + this.x, color = this.cells[index];
-        const a = this.rule.table[this.state]?.[color] || {w: color, t: "F", n: this.state, halt: false};
+        const a = this.rule.table[this.state]?.[Math.min(color, this.rule.colors - 1)] || {w: color, t: "F", n: this.state, halt: false};
         if (color !== a.w) { this.changes++; this.quiet = 0; } else this.quiet++;
         this.nonzero += Number(a.w !== 0) - Number(color !== 0);
         this.cells[index] = a.w; this.state = a.n;

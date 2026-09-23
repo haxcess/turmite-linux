@@ -25,7 +25,7 @@
   assert(sim.steps===1 && sim.halted && sim.x===1 && sim.y===1 && sim.heading===1 && sim.cells[4]===1,"HALT order");
   sim=new a.Simulation(fixture("H"),3,3);sim.step(50);assert(sim.moves===0 && sim.changes===1 && sim.quiet===49,"Hold counters");
   sim=new a.Simulation(fixture("L"),3,3);sim.cells[4]=5;sim.nonzero=1;sim.step();
-  assert(sim.cells[4]===5 && sim.y===0 && sim.state===0,"Unsupported-color fallback");
+  assert(sim.cells[4]===1 && sim.x===0 && sim.y===1 && sim.state===0,"Unsupported-color fallback");
   reject(()=>a.generate(5,6,1,false)); reject(()=>a.generate(2,7,1,false)); reject(()=>a.generate(2,6,0,false));
   reject(()=>a.validate({...fixture("L"),id:undefined})); reject(()=>a.validate({...fixture("L"),name:"line\nbreak"}));
   reject(()=>a.validate({...fixture("L"),table:[]}));

@@ -28,10 +28,10 @@ static void mappings(void)
                 world_store(&w, 31, color);
                 assert(ant_execute_quantum(ant, &c, &w, 1) == 1);
                 unsigned local = (color + TURMITE_COLORS - offset) % TURMITE_COLORS;
-                bool supported = local < n;
-                assert(world_load(&w, 31) == (supported ? (offset+(local+1)%n)%TURMITE_COLORS : color));
-                assert(atomic_load(&ant->state) == (supported ? 1 : 0));
-                assert(atomic_load(&ant->heading) == (supported ? 1 : 0));
+                if (local >= n) local = n - 1;
+                assert(world_load(&w, 31) == (offset+(local+1)%n)%TURMITE_COLORS);
+                assert(atomic_load(&ant->state) == 1);
+                assert(atomic_load(&ant->heading) == 1);
             }
         }
     }

@@ -64,6 +64,7 @@ static void place(AntColony *colony, Ant *ant, unsigned x, unsigned y)
     size_t i=(size_t)(ant-colony->ants);
     atomic_store(&colony->positions[i],(y<<16)|x);
     atomic_store(&colony->occupancy[y*colony->occupancy_width+x],i+1);
+    atomic_store(&ant->color_offset,0);
     atomic_store(&ant->heading,1);
     atomic_store(&ant->state,0);
 }
