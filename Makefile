@@ -2,7 +2,10 @@ CC ?= cc
 CFLAGS ?= -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L
 CPPFLAGS += $(shell pkg-config --cflags sdl2 2>/dev/null)
 LDLIBS += $(shell pkg-config --libs sdl2 2>/dev/null)
-LDLIBS += -pthread -lm
+PNG_CFLAGS := $(shell pkg-config --cflags libpng)
+PNG_LIBS := $(shell pkg-config --libs libpng)
+CPPFLAGS += $(PNG_CFLAGS)
+LDLIBS += -pthread -lm $(PNG_LIBS)
 
 SRC := \
   src/main.c \
@@ -13,6 +16,7 @@ SRC := \
   src/worker_pool.c \
   src/ant.c \
   src/dump.c \
+  src/png_image.c \
   src/renderer.c \
   src/renderer_sdl.c
 
@@ -66,7 +70,7 @@ tests/bench: tests/bench.c src/rng.c src/rules.c src/world.c src/ant.c src/sched
 	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $^ -pthread -lm -o $@
 
 clean:
-	rm -f tests/worker_pool_test tests/worker_pool_test_tsan $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench tests/render_test tests/renderer_sdl_test tests/multi_window_test tests/multi_monitor_app_test tests/scheduler_capacity_test tests/rule_trace tests/rule-traces.js tools/export_rule_catalog tests/generated_rules_check.c tests/generated_rules_check tests/mutation_test tests/mutation_stress tests/mutation_stress_tsan
+	rm -f tests/debug_quit_app_test tests/debug_drain_test tests/worker_pool_test tests/worker_pool_test_tsan $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench tests/render_test tests/renderer_sdl_test tests/multi_window_test tests/multi_monitor_app_test tests/scheduler_capacity_test tests/rule_trace tests/rule-traces.js tools/export_rule_catalog tests/generated_rules_check.c tests/generated_rules_check tests/mutation_test tests/mutation_stress tests/mutation_stress_tsan
 
 core-test: tests/headless_smoke tests/scheduler_capacity_test tests/mutation_test
 	./tests/headless_smoke
@@ -146,14 +150,14 @@ mutation-test: tests/mutation_test tests/mutation_stress
 tests/mutation_test: tests/mutation_test.c src/scheduler.c src/rng.c src/rules.c src/world.c src/ant.c $(wildcard src/*.h)
 	$(CC) $(CFLAGS) -I src $(filter-out src/scheduler.c,$(filter %.c,$^)) -pthread -lm -o $@
 
-tests/mutation_stress: tests/mutation_stress.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c src/dump.c $(wildcard src/*.h)
-	$(CC) $(CFLAGS) -I src $(filter %.c,$^) -pthread -lm -o $@
+tests/mutation_stress: tests/mutation_stress.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c src/dump.c src/png_image.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) $(PNG_CFLAGS) -I src $(filter %.c,$^) -pthread -lm $(PNG_LIBS) -o $@
 
 mutation-tsan-test: tests/mutation_stress_tsan
 	TSAN_OPTIONS=halt_on_error=1 ./tests/mutation_stress_tsan
 
-tests/mutation_stress_tsan: tests/mutation_stress.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c src/dump.c $(wildcard src/*.h)
-	$(CC) -O1 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src -fsanitize=thread $(filter %.c,$^) -pthread -lm -o $@
+tests/mutation_stress_tsan: tests/mutation_stress.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c src/dump.c src/png_image.c $(wildcard src/*.h)
+	$(CC) -O1 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L $(PNG_CFLAGS) -I src -fsanitize=thread $(filter %.c,$^) -pthread -lm $(PNG_LIBS) -o $@
 
 .PHONY: worker-pool-test worker-pool-tsan-test
 POOL_TEST_SRC = tests/worker_pool_test.c src/worker_pool.c src/scheduler.c src/ant.c src/rules.c src/rng.c src/world.c
@@ -165,3 +169,16 @@ tests/worker_pool_test: $(POOL_TEST_SRC) $(wildcard src/*.h)
 worker-pool-tsan-test:
 	$(CC) -O1 -g -std=c17 -D_POSIX_C_SOURCE=200809L -fsanitize=thread -I src $(POOL_TEST_SRC) $(POOL_TEST_WRAP) -pthread -lm -o tests/worker_pool_test_tsan
 	TSAN_OPTIONS=halt_on_error=1 ./tests/worker_pool_test_tsan
+
+.PHONY: png-test
+png-test: turmite tests/debug_quit_app_test
+	python3 tests/png_dump_test.py
+
+.PHONY: debug-drain-test
+debug-drain-test: tests/debug_drain_test
+	./tests/debug_drain_test
+tests/debug_drain_test: tests/debug_drain_test.c src/scheduler.c src/ant.c src/rules.c src/rng.c src/world.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter-out src/scheduler.c,$(filter %.c,$^)) -pthread -lm -o $@
+
+tests/debug_quit_app_test: tests/debug_quit_app_test.c $(SRC) $(wildcard src/*.h)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I src tests/debug_quit_app_test.c $(filter-out src/main.c,$(SRC)) $(LDLIBS) -Wl,--wrap=png_image_write,--wrap=render_argb,--wrap=ant_execute_quantum -o $@

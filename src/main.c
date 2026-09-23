@@ -26,15 +26,15 @@
 
 #define DEFAULT_WIDTH 1200
 #define DEFAULT_HEIGHT 800
-#define DEFAULT_CELL_SIZE 1
+#define DEFAULT_CELL_SIZE 2
 #define DISPLAY_FRAME_SLOTS 3
 #define CONTROL_QUEUE_SIZE 64
 #define DEFAULT_WORKERS 2
-#define DEFAULT_ANTS 8
-#define DEFAULT_QUANTUM 32
-#define DEFAULT_MIN_SERVICE 16
+#define DEFAULT_ANTS 3
+#define DEFAULT_QUANTUM 320
+#define DEFAULT_MIN_SERVICE 1600
 #define DEFAULT_TOKEN_RATE_DIVISOR 1
-#define DEFAULT_MINUTES 5.0
+#define DEFAULT_MINUTES 1.1
 #define MIN_QUANTUM 1
 #define MAX_QUANTUM 4096
 #define DEFAULT_DUMP_PAGES 127
@@ -281,6 +281,20 @@ static void choose_new_seed(Universe *u)
     u->seed = rng_entropy_seed();
 }
 
+static void universe_begin_debug_drain(Universe *u)
+{
+    if (u->debug_dump) return;
+    u->debug_dump = true;
+    u->paused = false;
+    u->restart = false;
+    scheduler_begin_drain(&u->scheduler);
+    if (!u->display_cells) u->display_cells = malloc(u->world.cells);
+    if (!u->display_cells || dump_begin_frames(&u->dump, u->dump_root) != 0) {
+        u->failed = true;
+        atomic_store_explicit(&u->quit, true, memory_order_release);
+    }
+}
+
 /* Interactive controls deliberately modify scheduler policy/population rather
  * than touching worker threads directly. This keeps control-plane operations
  * serialized through the scheduler. */
@@ -292,10 +306,11 @@ static void handle_key(Universe *u, SDL_Keycode key)
     }
 
     if (key == SDLK_q) {
-        u->debug_dump = true;
-        atomic_store_explicit(&u->quit, true, memory_order_release);
+        universe_begin_debug_drain(u);
         return;
     }
+
+    if (u->debug_dump) return; /* Do not pause/reseed/refill a draining universe. */
 
     if (key == SDLK_SPACE) {
         u->paused = !u->paused;
@@ -360,8 +375,7 @@ static void headless_poll_input(Universe *u)
 
     for (ssize_t i = 0; i < n; ++i) {
         if (buf[i] == 'q' || buf[i] == 'Q') {
-            u->debug_dump = true;
-            atomic_store_explicit(&u->quit, true, memory_order_release);
+            universe_begin_debug_drain(u);
             return;
         }
     }
@@ -401,13 +415,18 @@ static void universe_apply_commands(Universe *u)
  * for a slow upload. It never touches a slot held by main's SDL presentation. */
 static void universe_render(Universe *u, double age, bool paused)
 {
+    for (size_t i = 0; i < u->world.cells; ++i)
+        u->display_cells[i] = world_load(&u->world, i);
+    if (u->debug_dump && !u->failed &&
+        dump_write_frame(&u->dump, u->display_cells, u->palette) != 0) {
+        u->failed = true;
+        atomic_store_explicit(&u->quit, true, memory_order_release);
+    }
+    if (u->headless) return;
     pthread_mutex_lock(&u->view_lock);
     int slot = 0;
     while (slot == u->ready_frame || slot == u->displayed_frame) ++slot;
     pthread_mutex_unlock(&u->view_lock);
-
-    for (size_t i = 0; i < u->world.cells; ++i)
-        u->display_cells[i] = world_load(&u->world, i);
     const RenderFrame frame = { (size_t)u->world.width, (size_t)u->world.height, u->display_cells };
     (void)render_argb(&frame, u->palette, u->frame_pixels[slot], u->world.cells);
     u->frame_hud[slot] = (RendererHud){
@@ -464,15 +483,19 @@ static bool run_universe(Universe *u)
 
         double now = mono_seconds();
         double age = now - u->started_at;
-        if (age >= u->lifetime_minutes * 60.0) {
+        if (!u->debug_dump && age >= u->lifetime_minutes * 60.0) {
             timed_out = true;
             break;
         }
 
         dump_capture_maybe(&u->dump, &u->world, &u->colony, &u->scheduler, &u->rng, age, now);
 
-        if (!u->headless) {
+        if (!u->headless || u->debug_dump) {
             universe_render(u, age, u->paused);
+            if (u->debug_dump && scheduler_drain_complete(&u->scheduler)) {
+                atomic_store_explicit(&u->quit, true, memory_order_release);
+                break;
+            }
 
             next_frame += frame_period;
             double sleep_for = next_frame - mono_seconds();
@@ -493,16 +516,19 @@ static bool run_universe(Universe *u)
     worker_pool_suspend(u->pool, u->pool_slot);
 
     if (u->debug_dump) {
+        /* Always export the final stable frame after the last lease returns. */
+        if (!u->failed) universe_render(u, mono_seconds() - u->started_at, true);
         double final_age = mono_seconds() - u->started_at;
         dump_capture_now(&u->dump, &u->world, &u->colony, &u->scheduler, &u->rng, final_age, mono_seconds());
-        (void)dump_write(&u->dump, &u->world, &u->colony, &u->scheduler,
+        if (dump_write(&u->dump, &u->world, &u->colony, &u->scheduler,
                          u->workers, scheduler_get_quantum(&u->scheduler),
-                         u->lifetime_minutes, u->dump_root);
+                         u->lifetime_minutes, u->dump_root, u->palette) != 0)
+            u->failed = true;
     }
 
     if (timed_out) u->restart = true;
 
-    if (!u->headless) {
+    if (!u->headless && !u->debug_dump) {
         universe_render(u, mono_seconds() - u->started_at, true);
         /* Give main a chance to show the final frame without stalling peers. */
         struct timespec ts = { .tv_nsec = 400000000L };

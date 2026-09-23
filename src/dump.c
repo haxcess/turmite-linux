@@ -1,4 +1,5 @@
 #include "dump.h"
+#include "png_image.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -89,6 +90,8 @@ void dump_capture_destroy(DumpCapture *capture)
 void dump_capture_reset(DumpCapture *capture, const World *world, uint32_t seed, double now)
 {
     if (!capture || !world) return;
+    capture->output_dir[0] = 0;
+    capture->png_frames = 0;
     capture->page_count = 0;
     capture->next_page = 0;
     capture->next_capture_at = now;
@@ -225,23 +228,57 @@ static size_t chronological_slot(const DumpCapture *capture, size_t ordinal)
     return (first + ordinal) % capture->page_capacity;
 }
 
-int dump_write(const DumpCapture *capture, const World *world, const AntColony *colony,
-              const Scheduler *scheduler, size_t workers, size_t quantum,
-              double lifetime_minutes, const char *output_root)
+static int prepare_output(DumpCapture *capture, const char *output_root)
 {
-    if (!capture || !world || !colony || !scheduler || capture->page_count == 0) {
+    if (capture->output_dir[0]) return 0;
+    const char *root = output_root && *output_root ? output_root : dump_default_output_root();
+    if (make_dir_if_missing(root) != 0) return -1;
+    char stamp[32], dir[sizeof(capture->output_dir)];
+    make_timestamp(stamp, sizeof(stamp));
+    int n = snprintf(dir, sizeof(dir), "%s/tape-%08" PRIX32 "-%s", root, capture->seed, stamp);
+    if (n < 0 || (size_t)n >= sizeof(dir)) {
+        fprintf(stderr, "dump: output path too long\n");
+        return -1;
+    }
+    if (make_dir_if_missing(dir) != 0) return -1;
+    memcpy(capture->output_dir, dir, (size_t)n + 1);
+    return 0;
+}
+
+int dump_begin_frames(DumpCapture *capture, const char *output_root)
+{
+    if (prepare_output(capture, output_root) != 0) return -1;
+    char dir[560];
+    snprintf(dir, sizeof(dir), "%s/frames", capture->output_dir);
+    return make_dir_if_missing(dir);
+}
+
+int dump_write_frame(DumpCapture *capture, const uint8_t *colors,
+                     const uint32_t palette[TURMITE_COLORS])
+{
+    char path[640];
+    snprintf(path, sizeof(path), "%s/frames/frame-%08zu.png", capture->output_dir, capture->png_frames);
+    const RenderFrame frame = {(size_t)capture->world_width, (size_t)capture->world_height, colors};
+    if (png_image_write(path, &frame, palette) != 0) {
+        fprintf(stderr, "dump: cannot write %s\n", path);
+        return -1;
+    }
+    ++capture->png_frames;
+    return 0;
+}
+
+int dump_write(DumpCapture *capture, const World *world, const AntColony *colony,
+              const Scheduler *scheduler, size_t workers, size_t quantum,
+              double lifetime_minutes, const char *output_root,
+              const uint32_t palette[TURMITE_COLORS])
+{
+    if (!capture || !world || !colony || !scheduler || !palette || capture->page_count == 0) {
         fprintf(stderr, "dump: no pages captured\n");
         return -1;
     }
 
-    const char *root = output_root && *output_root ? output_root : dump_default_output_root();
-    if (make_dir_if_missing(root) != 0) return -1;
-
-    char stamp[32];
-    make_timestamp(stamp, sizeof(stamp));
-    char dir[512];
-    snprintf(dir, sizeof(dir), "%s/tape-%08" PRIX32 "-%s", root, capture->seed, stamp);
-    if (make_dir_if_missing(dir) != 0) return -1;
+    if (prepare_output(capture, output_root) != 0) return -1;
+    const char *dir = capture->output_dir;
 
     char pages_dir[560];
     snprintf(pages_dir, sizeof(pages_dir), "%s/pages", dir);
@@ -263,6 +300,8 @@ int dump_write(const DumpCapture *capture, const World *world, const AntColony *
     write_kv(manifest, "world_height", "%d", capture->world_height);
     write_kv(manifest, "world_cells", "%zu", capture->cells);
     write_kv(manifest, "colors", "%d", TURMITE_COLORS);
+    for (size_t i = 0; i < TURMITE_COLORS; ++i)
+        fprintf(manifest, "palette_%zu=%06" PRIX32 "\n", i, palette[i] & 0xffffffu);
     write_kv(manifest, "cell_format", "%s", "uint8 color index, row-major, top-to-bottom");
     write_kv(manifest, "workers", "%zu", workers);
     write_kv(manifest, "scheduler", "%s", "WFQ");
@@ -324,12 +363,27 @@ int dump_write(const DumpCapture *capture, const World *world, const AntColony *
         }
     }
 
+    /* Debug quit has drained workers and captured the final tape. Encode that
+     * stable page directly, with no additional full-frame allocation. */
+    const size_t final_slot = chronological_slot(capture, capture->page_count - 1);
+    const RenderFrame frame = {
+        (size_t)capture->world_width, (size_t)capture->world_height,
+        capture->world_pages + final_slot * capture->cells
+    };
+    snprintf(path, sizeof(path), "%s/universe.png", dir);
+    if (png_image_write(path, &frame, palette) != 0) {
+        fprintf(stderr, "dump: cannot write %s\n", path);
+        return -1;
+    }
+
     char readme_path[640];
     snprintf(readme_path, sizeof(readme_path), "%s/README.txt", dir);
     FILE *readme = fopen(readme_path, "w");
     if (readme) {
         fprintf(readme,
-                "This directory is a headless debug capture of Turmite Universe.\n\n"
+                "This directory is a debug capture of Turmite Universe.\n\n"
+                "frames/frame-NNNNNNNN.png records each rendered frame during debug drain.\n"
+                "universe.png shows the final page with the active palette, one pixel per cell.\n"
                 "pages/page-NNNN.bin is exactly %zu bytes: one uint8 color index per world cell,\n"
                 "row-major from top-left to bottom-right. Use manifest.txt for dimensions and metadata.\n"
                 "The page table is chronological; page 0000 is the oldest captured page in the ring.\n"

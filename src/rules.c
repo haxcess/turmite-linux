@@ -133,7 +133,7 @@ static const TurmiteRule RULES[] = {
     },
     /* Lab exports promoted to the immutable startup catalogue. */
     {
-        "red_walker", "Red Walker", 3, 4,
+        "noisefill_", "ropewalker-1", 3, 4,
         {
         { A(2, TURN_B, 0), A(0, TURN_L, 0), A(3, TURN_R, 2), A(2, TURN_L, 2) },
         { A(1, TURN_L, 0), A(0, TURN_B, 1), A(2, TURN_N, 2), A(3, TURN_F, 1) },
@@ -141,7 +141,21 @@ static const TurmiteRule RULES[] = {
         }
     },
     {
-        "mutant_bcff52d4", "Mutant bcff52d4 walker", 3, 2,
+        "noisefill_", "sandwalker-1", 2, 2,
+        {
+        { A(1, TURN_F, 1), A(1, TURN_L, 1) },
+        { A(1, TURN_R, 1), A(0, TURN_B, 0) }
+        }
+    },
+    {
+        "noisefill_", "zigwalker-3", 2, 4,
+        {
+        { A(1, TURN_L, 0), A(0, TURN_R, 1), A(0, TURN_F, 1), A(1, TURN_R, 1) },
+        { A(1, TURN_L, 1), A(3, TURN_L, 1), A(0, TURN_F, 0), A(3, TURN_S, 0) }
+        }
+    },
+    {
+        "noisefill_", "zigwalker-1", 3, 2,
         {
         { A(0, TURN_R, 1), A(0, TURN_L, 2) },
         { A(1, TURN_R, 2), A(0, TURN_F, 2) },
@@ -149,7 +163,13 @@ static const TurmiteRule RULES[] = {
         }
     },
     {
-        "mutant_f6438bee", "Mutant f6438bee", 3, 3,
+        "noisefill_", "plasmaze-1", 1, 4,
+        {
+        { A(1, TURN_R, 0), A(3, TURN_L, 0), A(3, TURN_R, 0), A(0, TURN_L, 0) }
+        }
+    },
+    {
+        "noisefill_", "stripes-1", 3, 3,
         {
         { A(1, TURN_L, 1), A(2, TURN_F, 2), A(2, TURN_F, 0) },
         { A(2, TURN_B, 0), A(0, TURN_L, 0), A(0, TURN_R, 1) },

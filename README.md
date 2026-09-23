@@ -4,7 +4,7 @@ An academic art piece exploring multithreading, evolution, and cellular automata
 
 ## Run
 
-Requires a C17 compiler, make, pkg-config, pthreads, and SDL2 development files.
+Requires a C17 compiler, make, pkg-config, pthreads, SDL2, and libpng development files.
 
 ```sh
 make

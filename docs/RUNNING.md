@@ -2,10 +2,10 @@
 
 ## Build
 
-Dependencies: C17 compiler, make, pkg-config, pthreads, SDL2 development files. Debian/Ubuntu:
+Dependencies: C17 compiler, make, pkg-config, pthreads, SDL2 and libpng development files. Debian/Ubuntu:
 
 ```sh
-sudo apt install build-essential pkg-config libsdl2-dev
+sudo apt install build-essential pkg-config libsdl2-dev libpng-dev
 make
 ./turmite
 ```
@@ -69,10 +69,10 @@ Keys affect the focused universe.
 | `+` / `=` | Request doubling, capped at 32 |
 | R | Clear and reseed |
 | H | Toggle HUD |
-| Q | Drain this universe’s leases, capture final page, write dump, close window |
+| Q | Stop token refill, export PNG frames while remaining tokens drain, write final dump, close window |
 | Esc / window close | Close without dump |
 
-Headless: `Q`/`q` then Enter dumps and exits. Closing one window leaves others running; last close exits. SDL application quit closes all.
+Headless: `Q`/`q` then Enter drains remaining tokens, exports PNG frames, writes the final dump, and exits. Closing one window leaves others running; last close exits. SDL application quit closes all.
 
 Pause permits outstanding grants to finish; lifecycle and capture continue. Restart restores configured population/quantum and uses fresh entropy. `--minutes` restarts universes; it does not terminate the process.
 

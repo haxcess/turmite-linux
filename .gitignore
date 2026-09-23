@@ -32,3 +32,6 @@ src/*.d
 
 /tests/worker_pool_test
 /tests/worker_pool_test_tsan
+
+/tests/debug_drain_test
+/tests/debug_quit_app_test

@@ -19,6 +19,7 @@ static uint64_t monotonic_us(void)
  * preserves sub-token accumulation while the bucket capacity bounds bursts. */
 static inline void accrue_tokens(Scheduler *scheduler, size_t index, Ant *ant, uint64_t now_us)
 {
+    if (scheduler->draining) return;
     uint64_t last_us = scheduler->last_token_us[index];
     if (now_us <= last_us) return;
     uint64_t elapsed_us = now_us - last_us;
@@ -98,7 +99,13 @@ static void recover_ant(Scheduler *scheduler, Ant *ant, uint64_t now_us)
         scheduler->recovery_at_us[index] = 0;
         ant_release_occupancy(ant, scheduler->colony);
         if (f & ANT_F_HALTED) {
+            const uint32_t remaining = atomic_load_explicit(&ant->tokens_fp, memory_order_relaxed);
             ant_rebirth_random(ant, scheduler->colony);
+            if (scheduler->draining) {
+                atomic_store_explicit(&ant->tokens_fp, remaining, memory_order_relaxed);
+                atomic_store_explicit(&ant->token_rate, 0, memory_order_relaxed);
+                atomic_fetch_or_explicit(&ant->flags, ANT_F_DRAINING, memory_order_relaxed);
+            }
             scheduler->last_token_us[index] = now_us;
             scheduler->fair_credit[index] = 0;
         } else {
@@ -119,8 +126,12 @@ static void recover_ant(Scheduler *scheduler, Ant *ant, uint64_t now_us)
 static Ant *candidate_locked(Scheduler *scheduler, uint64_t now_us, double *score)
 {
     if (scheduler->stopping) return NULL;
-    for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i)
-        recover_ant(scheduler, &scheduler->colony->ants[i], now_us);
+    for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
+        Ant *ant = &scheduler->colony->ants[i];
+        if (scheduler->draining && !(flags_load(ant) & ANT_F_LEASED))
+            retire_draining(ant, scheduler->colony);
+        recover_ant(scheduler, ant, now_us);
+    }
     if (atomic_load_explicit(&scheduler->paused, memory_order_acquire)) return NULL;
     Ant *best = NULL;
     double best_score = -DBL_MAX;
@@ -285,7 +296,7 @@ uint64_t scheduler_get_granted_instructions(const Scheduler *scheduler)
 void scheduler_set_paused(Scheduler *scheduler, bool paused)
 {
     pthread_mutex_lock(&scheduler->lock);
-    atomic_store_explicit(&scheduler->paused, paused, memory_order_release);
+    atomic_store_explicit(&scheduler->paused, paused && !scheduler->draining, memory_order_release);
     pthread_cond_broadcast(&scheduler->work_available);
     pthread_mutex_unlock(&scheduler->lock);
 }
@@ -356,6 +367,7 @@ int scheduler_init(Scheduler *scheduler, AntColony *colony, SchedulerPolicy poli
     scheduler->colony = colony;
     scheduler->policy = policy;
     scheduler->stopping = false;
+    scheduler->draining = false;
     atomic_init(&scheduler->dispatches, 0);
     atomic_init(&scheduler->empty_scans, 0);
     atomic_init(&scheduler->idle_waits, 0);
@@ -401,7 +413,7 @@ int scheduler_double_population(Scheduler *scheduler, World *world, Lfsr32 *rng,
 {
     pthread_mutex_lock(&scheduler->lock);
     size_t current = atomic_load_explicit(&scheduler->colony->active_population, memory_order_relaxed);
-    if (current >= TURMITE_MAX_ANTS) {
+    if (scheduler->draining || current >= TURMITE_MAX_ANTS) {
         pthread_mutex_unlock(&scheduler->lock);
         return 0;
     }
@@ -478,4 +490,35 @@ int scheduler_begin_halving(Scheduler *scheduler, size_t target_population)
     pthread_cond_broadcast(&scheduler->work_available);
     pthread_mutex_unlock(&scheduler->lock);
     return (int)marked;
+}
+
+void scheduler_begin_drain(Scheduler *scheduler)
+{
+    pthread_mutex_lock(&scheduler->lock);
+    scheduler->draining = true;
+    atomic_store_explicit(&scheduler->paused, false, memory_order_release);
+    for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
+        Ant *ant = &scheduler->colony->ants[i];
+        if (!(flags_load(ant) & ANT_F_ENABLED)) continue;
+        /* Leased ants finish against their existing balance; refill on release
+         * is disabled by the scheduler-wide flag. No worker-owned state edits. */
+        atomic_store_explicit(&ant->token_rate, 0, memory_order_relaxed);
+        atomic_fetch_or_explicit(&ant->flags, ANT_F_DRAINING, memory_order_relaxed);
+    }
+    pthread_cond_broadcast(&scheduler->work_available);
+    pthread_mutex_unlock(&scheduler->lock);
+}
+
+bool scheduler_drain_complete(Scheduler *scheduler)
+{
+    pthread_mutex_lock(&scheduler->lock);
+    bool complete = scheduler->draining;
+    for (size_t i = 0; i < TURMITE_MAX_ANTS; ++i) {
+        Ant *ant = &scheduler->colony->ants[i];
+        if (flags_load(ant) & ANT_F_LEASED) { complete = false; continue; }
+        if (scheduler->draining) retire_draining(ant, scheduler->colony);
+        if (flags_load(ant) & ANT_F_ENABLED) complete = false;
+    }
+    pthread_mutex_unlock(&scheduler->lock);
+    return complete;
 }
