@@ -60,6 +60,8 @@ typedef struct {
     uint32_t seed;
     int world_width;
     int world_height;
+    char output_dir[512];
+    size_t png_frames;
 } DumpCapture;
 
 int dump_capture_init(DumpCapture *capture, const World *world, uint32_t seed,
@@ -70,9 +72,14 @@ void dump_capture_maybe(DumpCapture *capture, const World *world, const AntColon
                         const Scheduler *scheduler, const Lfsr32 *rng, double age, double now);
 void dump_capture_now(DumpCapture *capture, const World *world, const AntColony *colony,
                       const Scheduler *scheduler, const Lfsr32 *rng, double age, double now);
-int dump_write(const DumpCapture *capture, const World *world, const AntColony *colony,
+/* Begin a streaming PNG sequence in the eventual dump directory. */
+int dump_begin_frames(DumpCapture *capture, const char *output_root);
+int dump_write_frame(DumpCapture *capture, const uint8_t *colors,
+                     const uint32_t palette[TURMITE_COLORS]);
+int dump_write(DumpCapture *capture, const World *world, const AntColony *colony,
               const Scheduler *scheduler, size_t workers, size_t quantum,
-              double lifetime_minutes, const char *output_root);
+              double lifetime_minutes, const char *output_root,
+              const uint32_t palette[TURMITE_COLORS]);
 
 bool dump_pages_value_valid(size_t pages);
 const char *dump_default_output_root(void);

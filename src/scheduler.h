@@ -26,6 +26,7 @@ typedef struct {
     AntColony *colony;
     SchedulerPolicy policy;
     bool stopping;
+    bool draining; /* lock-owned: debug quit forbids all new token creation */
     _Atomic bool paused;
 
     /* Profiling counters are observational and do not affect scheduling. */
@@ -67,6 +68,10 @@ uint64_t scheduler_get_granted_instructions(const Scheduler *scheduler);
 void scheduler_set_paused(Scheduler *scheduler, bool paused);
 void scheduler_wake_all(Scheduler *scheduler);
 void scheduler_stop(Scheduler *scheduler);
+/* Resume paused work, stop refill, consume final partial batches. Idempotent. */
+void scheduler_begin_drain(Scheduler *scheduler);
+/* True only once no enabled ant or outstanding lease can execute more work. */
+bool scheduler_drain_complete(Scheduler *scheduler);
 
 /* Population changes are expressed as scheduler policy: doubling clones healthy
  * ants into free slots, while halving marks weak ants to drain naturally. */

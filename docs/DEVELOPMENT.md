@@ -9,6 +9,10 @@
 | `make mutation-test` | Collision recovery, blocked residency, HALT, clone isolation; eight-worker stress with population changes/captures |
 | `make mutation-tsan-test` | Mutation stress under ThreadSanitizer |
 | `make tsan-test` | Core smoke under ThreadSanitizer |
+| `make color-offset-test` | All rule sizes, cyclic offsets, unsupported colors, translated Langton traces and lifecycle inheritance |
+| `make boundary-test` | Edge crossings, seeded tube orientation, wall overlays, safe single-bit mutation |
+| `make debug-drain-test` | Finite token budgets, paused/in-flight work, small balances, HALT/collision recovery |
+| `make png-test` | Headless/SDL Q drain; one PNG per rendered frame, finite budget, final-page selection, palettes and export failure |
 | `make render-test` | Six-color/code conversion, stable snapshots, invalid buffers |
 | `make sdl-test` | Dummy-video/software pixel readback and cleared frames |
 | `make multi-window-test` | Frame handoff, controls, restart, close isolation, simulated monitor enumeration |
@@ -17,7 +21,7 @@
 | `make struct-report` | Host ABI sizes |
 | `make bench`, `make perf-stat` | Throughput and hardware counters |
 
-Core tests/benchmark need no SDL; the main executable links SDL even in headless mode. TSAN requires a supported runtime. `perf` requires counter permissions. Default application/benchmark flags: `-O2 -g`. Dummy-video tests do not validate physical monitor placement or e-ink hardware.
+Core tests/benchmark need no SDL; the main executable links SDL and libpng even in headless mode. TSAN requires a supported runtime. `perf` requires counter permissions. Default application/benchmark flags: `-O2 -g`. Dummy-video tests do not validate physical monitor placement or e-ink hardware.
 
 ## Source map
 
@@ -29,7 +33,7 @@ Core tests/benchmark need no SDL; the main executable links SDL even in headless
 | `src/renderer.{h,c}` | Portable frame conversion |
 | `src/main.c` | Controllers, lifecycle, monitors, frame handoff, event routing |
 | `src/renderer_sdl.{h,c}` | SDL windows, presentation, HUD |
-| `src/dump.c`, `tools/analyze_dump.py` | Captures and analysis |
+| `src/dump.c`, `src/png_image.c`, `tools/analyze_dump.py` | Captures and analysis |
 | `rule-lab.html`, `tools/rule-*.js` | Rule editor, generator, catalogue |
 | `stm32/` | Unintegrated occupancy/port scaffold |
 
@@ -48,3 +52,7 @@ Stage, commit, and publish manually.
 [Experiments](EXPERIMENTS.md) · [Profiling](MEMORY_AND_PERF.md) · [Porting](stm32/INTEGRATION.md)
 
 `make worker-pool-test`: 20 ants across three universes, two workers, lease exclusivity, independent pause/reset, partial thread-creation failure. `make worker-pool-tsan-test`: same workload under ThreadSanitizer.
+
+Boundary stress: build `tests/mutation_stress`, then run it with `bouncy` or
+`radioactive` to exercise those box modes with eight workers and concurrent
+cloning, halving, and capture. No argument retains the original toroid stress.
