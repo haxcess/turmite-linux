@@ -27,6 +27,7 @@ make
 | `-x`, `--width N`; `-y`, `--height N` | 1200 × 800; windowed/headless |
 | `-R`, `--random` | Random HSV hues; saturation 80%, value 90% (color 0: 20%) |
 | `-r`, `--randomish` | Six hues spaced 32° across a random 160° arc; saturation 64–96%, value 90% (color 0: 20%) |
+| `-g`, `--glitter N` | Startup confetti; required integer 1–10; disabled when omitted |
 | `-c`, `--cell-size N` | 1; integer pixels per cell, 1–10 |
 | `-m`, `--minutes N` | 0.4 (24 seconds); positive restart interval |
 | `-u`, `--hud`; `-n`, `--no-hud` | Show/hide HUD; hidden by default |
@@ -77,3 +78,5 @@ Headless: `Q`/`q` then Enter drains remaining tokens, exports PNG frames, writes
 Pause permits outstanding grants to finish; lifecycle and capture continue. Restart restores configured population/quantum and uses fresh entropy. `--minutes` restarts universes; it does not terminate the process.
 
 [Behavior](SPEC.md) · [Dumps](DEBUGGING.md)
+
+Glitter requires a density, such as `--glitter 7` or `--glitter=7`. Omit the option to disable glitter. Each density level adds one shard per 1,000 cells (rounded up); shards are 3–7 by 1–3 simulation pixels, randomly horizontal or vertical, in colors 1–5. They wrap at edges and may overlap. `--cell-size` scales them with the tape. Explicit seeds reproduce the pattern; resets regenerate it.

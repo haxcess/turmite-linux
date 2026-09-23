@@ -182,3 +182,13 @@ tests/debug_drain_test: tests/debug_drain_test.c src/scheduler.c src/ant.c src/r
 
 tests/debug_quit_app_test: tests/debug_quit_app_test.c $(SRC) $(wildcard src/*.h)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I src tests/debug_quit_app_test.c $(filter-out src/main.c,$(SRC)) $(LDLIBS) -Wl,--wrap=png_image_write,--wrap=render_argb,--wrap=ant_execute_quantum -o $@
+
+.PHONY: color-test
+color-test:
+	$(CC) $(CFLAGS) -I src tests/color_offset_test.c src/ant.c src/world.c src/rng.c src/rules.c -pthread -lm -o /tmp/turmite-color-test
+	/tmp/turmite-color-test
+
+.PHONY: color-offset-test glitter-test
+color-offset-test: color-test
+glitter-test: tests/multi_window_test
+	SDL_VIDEODRIVER=dummy ./tests/multi_window_test

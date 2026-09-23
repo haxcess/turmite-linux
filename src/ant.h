@@ -44,6 +44,7 @@ struct Ant {
     _Atomic uint32_t flags;
     _Atomic uint8_t heading;
     _Atomic uint8_t state;
+    _Atomic uint8_t color_offset; /* local color zero, modulo TURMITE_COLORS */
     _Atomic uint16_t rule_index;
 
     const TurmiteRule *rule;

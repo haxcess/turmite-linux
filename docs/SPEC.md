@@ -7,7 +7,8 @@
 - Startup selects immutable `RULES[]` entries in `src/rules.c`.
 - Instruction order: spend token → read/select → write → state/turn → HALT or move.
 - Relative and absolute turns supported. `TURN_H` holds position; HALT ends the grant.
-- Unsupported state/color: preserve both, move forward.
+- Ants spawn with a random color offset 0–5. Local color is `(tape + 6 - offset) % 6`; unsupported colors select the highest local color. Writes translate back with `(local + offset) % 6`. The initial background remains global zero. Clones inherit offsets, mutations retain them, and rebirth chooses a fresh offset.
+- Unsupported state: preserve tape and state, move forward.
 - No global tick, transactional instruction, or rendering callback.
 - Packed positions: `(y << 16) | x`; `world_init()` permits dimensions up to 65535 per axis, subject to allocation.
 

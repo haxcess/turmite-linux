@@ -185,6 +185,7 @@ void ant_randomize(Ant *ant, AntColony *colony, const World *world, Lfsr32 *rng,
     if (seed == 0) seed = (uint32_t)(index + 1u);
     ant->rng_state = seed;
     ant->rule = rule;
+    atomic_store_explicit(&ant->color_offset, (uint8_t)ant_rng_uniform(&ant->rng_state, TURMITE_COLORS), memory_order_relaxed);
     atomic_store_explicit(&ant->rule_index, (uint16_t)rules_index_of(rule), memory_order_relaxed);
     atomic_store_explicit(&ant->heading, (uint8_t)ant_rng_uniform(&ant->rng_state, 4u), memory_order_relaxed);
     atomic_store_explicit(&ant->state, (uint8_t)ant_rng_uniform(&ant->rng_state, rule->states), memory_order_relaxed);
@@ -213,6 +214,7 @@ void ant_clone(Ant *dst, AntColony *colony, const Ant *src, const World *world, 
     }
     atomic_store_explicit(&dst->rule_index, atomic_load_explicit(&src->rule_index, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->heading, atomic_load_explicit(&src->heading, memory_order_relaxed), memory_order_relaxed);
+    atomic_store_explicit(&dst->color_offset, atomic_load_explicit(&src->color_offset, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->state, atomic_load_explicit(&src->state, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->token_rate, atomic_load_explicit(&src->token_rate, memory_order_relaxed), memory_order_relaxed);
     atomic_store_explicit(&dst->token_capacity_fp, atomic_load_explicit(&src->token_capacity_fp, memory_order_relaxed), memory_order_relaxed);
@@ -262,6 +264,7 @@ void ant_rebirth_random(Ant *ant, AntColony *colony)
 {
     TurmiteRule *private_rule = &colony->runtime_rules[ant_index_of(colony, ant)];
     rules_generate(private_rule, &ant->rng_state);
+    atomic_store_explicit(&ant->color_offset, (uint8_t)ant_rng_uniform(&ant->rng_state, TURMITE_COLORS), memory_order_relaxed);
     ant->rule = private_rule;
     atomic_store_explicit(&ant->rule_index, RULE_INDEX_RUNTIME, memory_order_relaxed);
     atomic_store_explicit(&ant->heading, (uint8_t)ant_rng_uniform(&ant->rng_state, 4u), memory_order_relaxed);
@@ -393,6 +396,7 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
     uint8_t heading = atomic_load_explicit(&ant->heading, memory_order_relaxed) & 3u;
     uint8_t state = atomic_load_explicit(&ant->state, memory_order_relaxed);
     const TurmiteRule *rule = ant->rule;
+    const uint8_t offset = atomic_load_explicit(&ant->color_offset, memory_order_relaxed);
     const size_t width = (size_t)world->width;
     size_t executed = 0;
 
@@ -409,13 +413,18 @@ size_t ant_execute_quantum(Ant *ant, AntColony *colony, World *world, size_t qua
         const size_t idx = (size_t)y * width + x;
         const uint8_t color = atomic_load_explicit(&world->data[idx], memory_order_relaxed);
         const RuleAction *action = NULL;
-        if (state < rule->states && color < rule->colors)
-            action = &rule->table[state][color];
+        unsigned local = (color + TURMITE_COLORS - offset) % TURMITE_COLORS;
+        if (state < rule->states && rule->colors > 0) {
+            if (local >= rule->colors) local = rule->colors - 1u;
+            action = &rule->table[state][local];
+        }
         RuleAction fallback = { color, TURN_F, state, false };
+        const uint8_t write_color = action
+            ? (uint8_t)((action->write_color + offset) % TURMITE_COLORS) : color;
         if (!action) action = &fallback;
 
         /* Presentation observes the tape independently of ant execution. */
-        world_store_cell(world, idx, action->write_color);
+        world_store_cell(world, idx, write_color);
 
         state = action->next_state;
         heading = apply_turn(heading, action->turn);

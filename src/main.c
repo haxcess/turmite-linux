@@ -39,6 +39,7 @@
 #define MAX_QUANTUM 4096
 #define DEFAULT_DUMP_PAGES 127
 #define DEFAULT_DUMP_INTERVAL 1.0
+#define GLITTER_DENSITY_DEFAULT 0
 
 /* Monotonic time drives simulation age and token accounting so wall-clock
  * adjustments cannot make ants gain or lose execution budget unexpectedly. */
@@ -87,6 +88,7 @@ typedef struct {
     int width;
     int height;
     int cell_size;
+    unsigned glitter_density;
     int display_index;
     bool fullscreen;
     size_t workers;
@@ -110,11 +112,34 @@ typedef struct {
     size_t pool_slot;
 } Universe;
 
+/* Seed actual tape cells, so ants can read and overwrite the confetti.
+ * Density adds one shard per 1000 cells per level; overlap is intentional. */
+static void universe_glitter(Universe *u)
+{
+    Lfsr32 rng;
+    rng_seed(&rng, u->seed ^ UINT32_C(0x676c6974));
+    const size_t shards = (u->world.cells * u->glitter_density + 999u) / 1000u;
+    for (size_t i = 0; i < shards; ++i) {
+        const unsigned length = 3u + rng_uniform(&rng, 5);
+        const unsigned width = 1u + rng_uniform(&rng, 3);
+        const unsigned vertical = rng_uniform(&rng, 2);
+        const unsigned x = rng_uniform(&rng, (uint32_t)u->world.width);
+        const unsigned y = rng_uniform(&rng, (uint32_t)u->world.height);
+        const uint8_t color = (uint8_t)(1u + rng_uniform(&rng, TURMITE_COLORS - 1u));
+        for (unsigned a = 0; a < length; ++a) for (unsigned b = 0; b < width; ++b) {
+            const unsigned px = (x + (vertical ? b : a)) % (unsigned)u->world.width;
+            const unsigned py = (y + (vertical ? a : b)) % (unsigned)u->world.height;
+            world_store_cell(&u->world, (size_t)py * u->world.width + px, color);
+        }
+    }
+}
+
 /* Reset the shared tape and ant population for a fresh universe while keeping
  * the process-level configuration (display, workers, scheduler tuning) intact. */
 static void universe_seed(Universe *u)
 {
     world_clear(&u->world);
+    universe_glitter(u);
     ant_colony_reset(&u->colony);
     rng_seed(&u->rng, u->seed);
     render_palette_init(u->palette, u->palette_mode, u->seed);
@@ -193,6 +218,7 @@ fail:
  * interpretation; callers add any narrower semantic range checks. */
 static bool parse_uint(const char *s, size_t *out)
 {
+    if (!s) return false;
     char *end = NULL;
     errno = 0;
     unsigned long long v = strtoull(s, &end, 0);
@@ -245,6 +271,7 @@ static const OptionHelp option_help[] = {
     {'u', "hud",                 NULL,  "show developer HUD (hidden by default)"},
     {'R', "random",              NULL,  "random HSV hues, dark background, S=80%, V=90%"},
     {'r', "randomish",           NULL,  "hues spaced 32 degrees in random 160-degree arc"},
+    {'g', "glitter",            "N",   "startup confetti density (1..10; disabled by default)"},
     {'c', "cell-size",           "N",   "pixels per cell (1..10, default 1)"},
     {'x', "width",               "N",   "windowed/headless canvas width (default 1200)"},
     {'y', "height",              "N",   "windowed/headless canvas height (default 800)"},
@@ -611,6 +638,7 @@ int main(int argc, char **argv)
     uint32_t explicit_seed = 0;
     bool has_seed = false;
     bool headless = false;
+    size_t glitter_density = GLITTER_DENSITY_DEFAULT;
 
     static const struct option opts[] = {
         {"seed", required_argument, NULL, 's'},
@@ -626,6 +654,7 @@ int main(int argc, char **argv)
         {"hud", no_argument, NULL, 'u'},
         {"random", no_argument, NULL, 'R'},
         {"randomish", no_argument, NULL, 'r'},
+        {"glitter", required_argument, NULL, 'g'},
         {"cell-size", required_argument, NULL, 'c'},
         {"width", required_argument, NULL, 'x'},
         {"height", required_argument, NULL, 'y'},
@@ -640,7 +669,7 @@ int main(int argc, char **argv)
     };
 
     for (;;) {
-        int c = getopt_long(argc, argv, "s:a:q:b:v:w:p:WFAuRrc:x:y:m:d:i:D:nHh", opts, NULL);
+        int c = getopt_long(argc, argv, "s:a:q:b:v:w:p:WFAuRrg:c:x:y:m:d:i:D:nHh", opts, NULL);
         if (c == -1) break;
         switch (c) {
             case 's': if (!parse_seed(optarg, &explicit_seed)) { fprintf(stderr, "bad --seed\n"); return 2; } has_seed = true; break;
@@ -656,6 +685,7 @@ int main(int argc, char **argv)
             case 'u': hud = true; break;
             case 'R': palette_mode = RENDER_PALETTE_RANDOM; break;
             case 'r': palette_mode = RENDER_PALETTE_RANDOMISH; break;
+            case 'g': if (!parse_uint(optarg, &glitter_density) || glitter_density > 10) { fprintf(stderr, "--glitter must be 1..10\n"); return 2; } break;
             case 'c': if (!parse_uint(optarg, &cell_size) || cell_size > 10) { fprintf(stderr, "--cell-size must be 1..10\n"); return 2; } break;
             case 'x': if (!parse_uint(optarg, &width)) { fprintf(stderr, "bad --width\n"); return 2; } break;
             case 'y': if (!parse_uint(optarg, &height)) { fprintf(stderr, "bad --height\n"); return 2; } break;
@@ -670,6 +700,7 @@ int main(int argc, char **argv)
         }
     }
 
+    if (optind < argc) { fprintf(stderr, "unexpected argument: %s\n", argv[optind]); return 2; }
     const int displays = headless ? 1 : renderer_display_count();
     if (displays <= 0 || (!headless && !all_displays && display_index >= displays)) {
         fprintf(stderr, "no usable displays or invalid --display index\n");
@@ -704,6 +735,7 @@ int main(int argc, char **argv)
             break;
         }
         u->cell_size = (int)cell_size;
+        u->glitter_density = glitter_density;
         u->width = (int)world_width;
         u->height = (int)world_height;
         u->fullscreen = fullscreen;

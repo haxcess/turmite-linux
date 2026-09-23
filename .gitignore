@@ -1,23 +1,16 @@
+# Build products
 /turmite
 /turmite.exe
 src/*.o
 src/*.d
 
-# Rule-lab build and test products
-/tools/export_rule_catalog
-/tools/rule-catalog.js.tmp
-/tests/scheduler_capacity_test
-/tests/rule_trace
-/tests/rule-traces.js
-/tests/generated_rules_check.c
-/tests/generated_rules_check
-
 # working folders
 /patches/
 /turmite-dumps/
-/tests/mutation_test
-/tests/mutation_stress
-/tests/mutation_stress_tsan
+/tests/
+# Rule-lab build and test products
+/tools/export_rule_catalog
+/tools/rule-catalog.js.tmp
 
 # Android local configuration and build products
 /android/.gradle/
@@ -29,9 +22,3 @@ src/*.d
 /android/*.jks
 /android/*.keystore
 /android/.docker-cache/
-
-/tests/worker_pool_test
-/tests/worker_pool_test_tsan
-
-/tests/debug_drain_test
-/tests/debug_quit_app_test

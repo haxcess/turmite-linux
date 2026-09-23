@@ -12,7 +12,7 @@ Open [rule-lab.html](../rule-lab.html) with `tools/` alongside it. Offline; no s
 
 **Mutate one action** changes one seeded turn; no HALT insertion. Linux collision mutation can change any action field; see [runtime evolution](SPEC.md#collisions-and-mutation).
 
-Instruction order matches C: write → state/turn → HALT or move. Unsupported colors preserve color/state and move forward. HALT stops the lab; Linux performs rebirth. The lab has no concurrent collisions, token scheduling, or lifecycle restarts. Exact catalogue-match warnings do not establish novelty.
+Instruction order matches C: write → state/turn → HALT or move. Unsupported colors execute the highest indexed color’s action. The lab uses offset zero. HALT stops the lab; Linux performs rebirth. The lab has no concurrent collisions, token scheduling, or lifecycle restarts. Exact catalogue-match warnings do not establish novelty.
 
 ## Export to C
 
