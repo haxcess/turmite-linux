@@ -13,7 +13,7 @@ Pending H745/H747 design; no Cube projects, linker scripts, worker tasks, or har
 - Split token/credit policy from pthread locks, waits, clocks, and notifications.
 - Add compile-time Linux CAS / STM32 HSEM occupancy backends.
 - Define ownership for flags, leases, health, positions, RNG, counters, and reset state; audit atomic widths with the selected toolchain.
-- Use cross-image catalogue IDs and explicit runtime-table storage. Sentinel 65535 does not identify a table. Deep-copy clone tables; publish mutations only after lease release.
+- Use cross-image catalogue IDs and explicit runtime-table storage. Sentinel 65535 does not identify a table. New spawns select library rules; publish private-table mutations only after lease release.
 - Port instruction-boundary collision stop, 50 ms recovery, retained-cell waiting, and HALT precedence from [SPEC](../SPEC.md).
 
 ## Firmware and HSEM

@@ -44,7 +44,7 @@ void render_palette_init(uint32_t palette[TURMITE_COLORS],
                          RenderPaletteMode mode, uint32_t seed)
 {
     const float saturation = 0.8f;
-    const float value = 0.9f;
+    const float value = 0.7f;
     const float background_value = 0.2f;
     uint32_t state = seed;
     /* Warm the private stream so small explicit seeds yield varied hues. */
@@ -87,8 +87,11 @@ bool render_argb(const RenderFrame *frame,
     const size_t count = render_frame_cells(frame);
     if (!count || !palette || !pixels || capacity < count ||
         count > SIZE_MAX / sizeof(*pixels)) return false;
+    uint32_t argb[TURMITE_COLORS];
+    for (size_t i = 0; i < TURMITE_COLORS; ++i)
+        argb[i] = 0xff000000u | (palette[i] & 0xffffffu);
     for (size_t i = 0; i < count; ++i)
-        pixels[i] = 0xff000000u | (palette[color_index(frame->colors[i])] & 0xffffffu);
+        pixels[i] = argb[color_index(frame->colors[i])];
     return true;
 }
 

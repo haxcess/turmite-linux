@@ -22,7 +22,7 @@ Equivalent perf targets: `perf-stat-unbatched`, `perf-stat-1w`, `perf-stat-satur
 ./turmite -W -p 0 --width 600 --height 400 --dump-pages 7 --seed 0x12345678 --ants 8 --workers 2 --min-service 16 --quantum 64
 ```
 
-Repeat with quantum 2, 8, 64, 256; then minimum service 1. For slow bursts, use `--token-rate-divisor 100 --quantum 64 --min-service 32`. Startup, clones, and HALT rebirth receive full buckets; collision mutation preserves balance.
+Repeat with quantum 2, 8, 64, 256; then minimum service 1. For slow bursts, use `--token-rate-divisor 100 --quantum 64 --min-service 32`. Startup, new spawns, and HALT rebirth receive full buckets; collision mutation preserves balance.
 
 ## Manual checks
 
@@ -31,7 +31,7 @@ Repeat with quantum 2, 8, 64, 256; then minimum service 1. For slow bursts, use 
 | `./turmite -A --dump-pages 7` | One fullscreen universe per physical monitor |
 | `./turmite -F -p 1 -u --dump-pages 7` | Selected monitor and HUD |
 | Focus one window; Space, H, R, Esc | Controls and close remain local |
-| `+`, `-` | Best-effort cloning and drain retirement |
+| `+`, `-` | Spawn one random library ant; request drain retirement |
 | `--minutes 0.25` | Restart every 15 seconds; process continues |
 | R | Fresh tape, no retained visual history |
 

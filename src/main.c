@@ -22,17 +22,18 @@
 
 /* Linux orchestration: main owns SDL windows/events/presentation. Each monitor
  * has an independent universe controller for lifecycle, capture and frame
- * preparation, plus a shared process-wide ant worker pool. SDL is never called by those threads. */
+ * preparation, plus a shared process-wide ant worker pool. Only main owns SDL
+ * rendering; controllers may push wake events into its thread-safe event queue. */
 
-#define DEFAULT_WIDTH 1200
-#define DEFAULT_HEIGHT 800
+#define DEFAULT_WIDTH 1024
+#define DEFAULT_HEIGHT 768
 #define DEFAULT_CELL_SIZE 2
 #define DISPLAY_FRAME_SLOTS 3
 #define CONTROL_QUEUE_SIZE 64
 #define DEFAULT_WORKERS 2
 #define DEFAULT_ANTS 3
 #define DEFAULT_QUANTUM 320
-#define DEFAULT_MIN_SERVICE 1600
+#define DEFAULT_MIN_SERVICE 512
 #define DEFAULT_TOKEN_RATE_DIVISOR 1
 #define DEFAULT_MINUTES 1.1
 #define MIN_QUANTUM 1
@@ -101,6 +102,7 @@ typedef struct {
     double dump_interval;
     const char *dump_root;
     bool hud_visible;
+    bool collision_mutation;
     _Atomic bool quit;
     bool restart;
     bool debug_dump;
@@ -188,6 +190,7 @@ static int universe_init(Universe *u, uint32_t seed)
     universe_seed(u);
     if (scheduler_init(&u->scheduler, &u->colony, SCHED_WFQ, u->quantum) != 0) goto fail;
     u->scheduler_initialized = true;
+    u->scheduler.collision_mutation = u->collision_mutation;
     scheduler_set_min_service(&u->scheduler, u->min_service);
     scheduler_set_token_rate_divisor(&u->scheduler, u->token_rate_divisor);
     if (dump_capture_init(&u->dump, &u->world, u->seed, u->dump_pages,
@@ -279,7 +282,7 @@ static const OptionHelp option_help[] = {
     {'d', "dump-pages",          "N",   "retained debug pages: 1,3,7,...,1023 (default 127)"},
     {'i', "dump-interval",       "N",   "seconds between retained pages (default 1)"},
     {'D', "dump-dir",            "PATH","parent directory for debug dumps (default ./turmite-dumps)"},
-    {'n', "no-hud",              NULL,  "hide developer HUD"},
+    {'M', "collision-mutation",  NULL,  "mutate rules after collisions (disabled by default)"},
     {'H', "headless",            NULL,  "run without SDL; type Q then Enter to debug-quit"},
     {'h', "help",                NULL,  "show this help"},
 };
@@ -365,18 +368,20 @@ static void handle_key(Universe *u, SDL_Keycode key)
         return;
     }
 
-    if (key == SDLK_EQUALS || key == SDLK_KP_PLUS) {
+    // Add random ants
+    if (key == SDLK_EQUALS || key == SDLK_PLUS || key == SDLK_KP_PLUS) {
         size_t current = scheduler_active_population(&u->scheduler);
         if (current < TURMITE_MAX_ANTS) {
-            (void)scheduler_double_population(&u->scheduler, &u->world, &u->rng, mono_microseconds());
+            (void)scheduler_spawn_ant(&u->scheduler, &u->world, &u->rng, mono_microseconds());
         }
         return;
     }
 
+    // Cull the population, scheduler target "weak" ants
     if (key == SDLK_MINUS || key == SDLK_KP_MINUS) {
         size_t current = scheduler_active_population(&u->scheduler);
         if (current > 2) {
-            (void)scheduler_begin_halving(&u->scheduler, current / 2);
+            (void)scheduler_begin_culling(&u->scheduler, current / 2);  // Mark half the population for culling
         }
         return;
     }
@@ -390,7 +395,12 @@ static void headless_poll_input(Universe *u)
 
     struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
     int rc = poll(&pfd, 1, 0);
-    if (rc <= 0 || !(pfd.revents & (POLLIN | POLLHUP))) return;
+    if (rc <= 0) return;
+    if (pfd.revents & (POLLERR | POLLNVAL)) {
+        u->stdin_eof = true;
+        return;
+    }
+    if (!(pfd.revents & (POLLIN | POLLHUP))) return;
 
     char buf[64];
     ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
@@ -398,7 +408,11 @@ static void headless_poll_input(Universe *u)
         u->stdin_eof = true;
         return;
     }
-    if (n < 0) return;
+    if (n < 0) {
+        if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
+            u->stdin_eof = true;
+        return;
+    }
 
     for (ssize_t i = 0; i < n; ++i) {
         if (buf[i] == 'q' || buf[i] == 'Q') {
@@ -443,7 +457,7 @@ static void universe_apply_commands(Universe *u)
 static void universe_render(Universe *u, double age, bool paused)
 {
     for (size_t i = 0; i < u->world.cells; ++i)
-        u->display_cells[i] = world_load(&u->world, i);
+        u->display_cells[i] = atomic_load_explicit(&u->world.data[i], memory_order_relaxed);
     if (u->debug_dump && !u->failed &&
         dump_write_frame(&u->dump, u->display_cells, u->palette) != 0) {
         u->failed = true;
@@ -469,8 +483,13 @@ static void universe_render(Universe *u, double age, bool paused)
     /* HUD visibility travels with the frame; renderer fields stay main-owned. */
     u->frame_hud[slot].visible = u->hud_visible;
     pthread_mutex_lock(&u->view_lock);
+    bool notify = u->ready_frame < 0;
     u->ready_frame = slot;
     pthread_mutex_unlock(&u->view_lock);
+    if (notify) {
+        SDL_Event event = {.type = SDL_USEREVENT};
+        (void)SDL_PushEvent(&event);
+    }
 }
 
 /* Main consumes a prepared buffer. No world scan or conversion on this thread. */
@@ -534,9 +553,15 @@ static bool run_universe(Universe *u)
                 next_frame = mono_seconds();
             }
         } else {
-            /* Keep the control/dump thread cool while workers burn the universe. */
-            struct timespec ts = { .tv_sec = 0, .tv_nsec = 10000000L };
-            nanosleep(&ts, NULL);
+            /* Sleep until input or the next capture/restart deadline. EOF must
+             * remove stdin from poll, otherwise a closed pipe spins forever. */
+            double deadline = u->started_at + u->lifetime_minutes * 60.0;
+            if (u->dump.next_capture_at < deadline) deadline = u->dump.next_capture_at;
+            double remaining = deadline - mono_seconds();
+            if (remaining > 1.0) remaining = 1.0;
+            int timeout = remaining > 0.0 ? (int)(remaining * 1000.0) + 1 : 0;
+            struct pollfd input = {.fd = STDIN_FILENO, .events = POLLIN};
+            (void)poll(u->stdin_eof ? NULL : &input, u->stdin_eof ? 0 : 1, timeout);
         }
     }
 
@@ -583,10 +608,15 @@ static void *universe_control(void *arg)
             break;
         }
         u->scheduler_initialized = true;
+        u->scheduler.collision_mutation = u->collision_mutation;
         scheduler_set_min_service(&u->scheduler, u->min_service);
         scheduler_set_token_rate_divisor(&u->scheduler, u->token_rate_divisor);
     }
     atomic_store_explicit(&u->done, true, memory_order_release);
+    if (!u->headless) {
+        SDL_Event event = {.type = SDL_USEREVENT};
+        (void)SDL_PushEvent(&event);
+    }
     return NULL;
 }
 
@@ -634,6 +664,7 @@ int main(int argc, char **argv)
     double dump_interval = DEFAULT_DUMP_INTERVAL;
     const char *dump_root = dump_default_output_root();
     bool hud = false;
+    bool collision_mutation = false;
     RenderPaletteMode palette_mode = RENDER_PALETTE_DEFAULT;
     uint32_t explicit_seed = 0;
     bool has_seed = false;
@@ -662,21 +693,21 @@ int main(int argc, char **argv)
         {"dump-pages", required_argument, NULL, 'd'},
         {"dump-interval", required_argument, NULL, 'i'},
         {"dump-dir", required_argument, NULL, 'D'},
-        {"no-hud", no_argument, NULL, 'n'},
+        {"collision-mutation", no_argument, NULL, 'M'},
         {"headless", no_argument, NULL, 'H'},
         {"help", no_argument, NULL, 'h'},
         {NULL, 0, NULL, 0}
     };
 
     for (;;) {
-        int c = getopt_long(argc, argv, "s:a:q:b:v:w:p:WFAuRrg:c:x:y:m:d:i:D:nHh", opts, NULL);
+        int c = getopt_long(argc, argv, "s:a:q:b:v:w:p:WFAuRrg:c:x:y:m:d:i:D:MHh", opts, NULL);
         if (c == -1) break;
         switch (c) {
             case 's': if (!parse_seed(optarg, &explicit_seed)) { fprintf(stderr, "bad --seed\n"); return 2; } has_seed = true; break;
             case 'a': if (!parse_uint(optarg, &ants) || !valid_population(ants)) { fprintf(stderr, "--ants must be 2-32\n"); return 2; } break;
-            case 'q': if (!parse_uint(optarg, &quantum) || quantum < MIN_QUANTUM || quantum > MAX_QUANTUM) { fprintf(stderr, "bad --quantum\n"); return 2; } break;
-            case 'b': if (!parse_uint(optarg, &min_service) || min_service < 1 || min_service > MAX_QUANTUM) { fprintf(stderr, "bad --min-service\n"); return 2; } break;
-            case 'v': if (!parse_uint(optarg, &token_rate_divisor) || token_rate_divisor > UINT32_MAX) { fprintf(stderr, "bad --token-rate-divisor\n"); return 2; } break;
+            case 'q': if (!parse_uint(optarg, &quantum) || quantum < MIN_QUANTUM || quantum > MAX_QUANTUM) { fprintf(stderr, "bad integer in --quantum\n"); return 2; } break;
+            case 'b': if (!parse_uint(optarg, &min_service) || min_service < 1 || min_service > MAX_QUANTUM) { fprintf(stderr, "bad integer in --min-service\n"); return 2; } break;
+            case 'v': if (!parse_uint(optarg, &token_rate_divisor) || token_rate_divisor > UINT32_MAX) { fprintf(stderr, "bad integer in --token-rate-divisor\n"); return 2; } break;
             case 'w': if (!parse_uint(optarg, &workers) || workers > 8) { fprintf(stderr, "--workers must be 1..8\n"); return 2; } break;
             case 'p': if (!parse_display(optarg, &display_index)) { fprintf(stderr, "bad --display\n"); return 2; } break;
             case 'W': fullscreen = false; all_displays = false; break;
@@ -693,7 +724,7 @@ int main(int argc, char **argv)
             case 'd': if (!parse_uint(optarg, &dump_pages) || !dump_pages_value_valid(dump_pages)) { fprintf(stderr, "--dump-pages must be 1,3,7,...,1023\n"); return 2; } break;
             case 'i': dump_interval = strtod(optarg, NULL); if (dump_interval <= 0.0) { fprintf(stderr, "bad --dump-interval\n"); return 2; } break;
             case 'D': dump_root = optarg; break;
-            case 'n': hud = false; break;
+            case 'M': collision_mutation = true; break;
             case 'H': headless = true; break;
             case 'h': usage(argv[0]); return 0;
             default: usage(argv[0]); return 2;
@@ -750,6 +781,7 @@ int main(int argc, char **argv)
         u->dump_root = dump_root;
         u->headless = headless;
         u->hud_visible = hud;
+        u->collision_mutation = collision_mutation;
         u->palette_mode = palette_mode;
         atomic_init(&u->quit, false);
         atomic_init(&u->done, false);
@@ -803,7 +835,10 @@ int main(int argc, char **argv)
                     universe_destroy(u);
                 } else ++live;
             }
-            if (live) SDL_Delay(1);
+            /* Frames and controller completion post events. The timeout is a
+             * fallback if SDL rejects an event; there is no millisecond poll. */
+            if (live && SDL_WaitEventTimeout(&event, 100))
+                route_event(universes, count, &event);
         }
     }
     /* Also covers partial thread creation: request stop, join, then free. */

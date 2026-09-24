@@ -3,13 +3,13 @@
 ## Correctness
 
 - Preserve instruction-boundary collision stops, 50 ms recovery, HALT precedence, and private rule ownership.
-- Handle bounded placement failure; check population requests under active leases/collisions.
-- Review one-second accrual clamp at large divisors.
+- Spawn placement failure and active-lease behavior are covered by `make spawn-test`.
+- Long-sleep accrual and extreme rate scales are covered by `make scheduler-deadline-test`.
 - Fix single-page capture deltas if required; define any additional dump metadata.
 
 ## Measurements
 
-- Rebaseline unbatched, batched, saturated, one-worker, and two-worker runs after mutation changes.
+- See [September 2026 measurements](PERFORMANCE_REVIEW.md); extend them to real multi-monitor workloads.
 - Measure per-instruction flag reads before reducing publication frequency.
 - Separate scheduler scan/recovery costs from tape and occupancy costs.
 - Measure controller capture/conversion, SDL uploads, dropped frames, and memory across monitor counts.

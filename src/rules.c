@@ -141,21 +141,21 @@ static const TurmiteRule RULES[] = {
         }
     },
     {
-        "noisefill_", "sandwalker-1", 2, 2,
+        "noisefill_sandwalker_1", "sandwalker-1", 2, 2,
         {
         { A(1, TURN_F, 1), A(1, TURN_L, 1) },
         { A(1, TURN_R, 1), A(0, TURN_B, 0) }
         }
     },
     {
-        "noisefill_", "zigwalker-3", 2, 4,
+        "noisefill_zigwalker_3", "zigwalker-3", 2, 4,
         {
         { A(1, TURN_L, 0), A(0, TURN_R, 1), A(0, TURN_F, 1), A(1, TURN_R, 1) },
         { A(1, TURN_L, 1), A(3, TURN_L, 1), A(0, TURN_F, 0), A(3, TURN_S, 0) }
         }
     },
     {
-        "noisefill_", "zigwalker-1", 3, 2,
+        "noisefill_zigwalker_1", "zigwalker-1", 3, 2,
         {
         { A(0, TURN_R, 1), A(0, TURN_L, 2) },
         { A(1, TURN_R, 2), A(0, TURN_F, 2) },
@@ -163,13 +163,13 @@ static const TurmiteRule RULES[] = {
         }
     },
     {
-        "noisefill_", "plasmaze-1", 1, 4,
+        "radiation", "creeping radiation", 1, 4,
         {
         { A(1, TURN_R, 0), A(3, TURN_L, 0), A(3, TURN_R, 0), A(0, TURN_L, 0) }
         }
     },
     {
-        "noisefill_", "stripes-1", 3, 3,
+        "noisefill_stripes_1", "stripes-1", 3, 3,
         {
         { A(1, TURN_L, 1), A(2, TURN_F, 2), A(2, TURN_F, 0) },
         { A(2, TURN_B, 0), A(0, TURN_L, 0), A(0, TURN_R, 1) },
@@ -199,40 +199,40 @@ static const TurmiteRule RULES[] = {
         }
     },
     {
-        "mutant_48616bab", "RedGreen Handy", 2, 5,
+        "noisefill_48616bab", "Alien Streets", 2, 5,
         {
         { A(4, TURN_F, 1), A(4, TURN_R, 0), A(1, TURN_B, 1), A(1, TURN_N, 0), A(3, TURN_B, 1) },
         { A(2, TURN_E, 1), A(2, TURN_H, 1), A(1, TURN_S, 0), A(0, TURN_S, 1), A(0, TURN_N, 1) }
         }
     },
     {
-        "mutant_f1ab6bf2", "Alien Words", 2, 5,
+        "noisefill_f1ab6bf2", "Alien Words", 2, 5,
         {
         { A(4, TURN_B, 1), A(4, TURN_R, 0), A(1, TURN_B, 1), A(1, TURN_N, 0), A(3, TURN_B, 1) },
         { A(2, TURN_E, 1), A(2, TURN_W, 1), A(1, TURN_S, 0), A(0, TURN_S, 1), A(0, TURN_N, 1) }
         }
     },
     {
-        "mutant_9f1b1831", "Alien Sands", 2, 5,
+        "noisefill_9f1b1831", "Alien Sands", 2, 5,
         {
         { A(4, TURN_B, 1), A(4, TURN_R, 0), A(1, TURN_S, 1), A(1, TURN_S, 0), A(3, TURN_R, 1) },
         { A(2, TURN_E, 1), A(2, TURN_E, 1), A(1, TURN_H, 0), A(0, TURN_E, 1), A(0, TURN_N, 1) }
         }
     },
     {
-        "mutant_8e1a2aba", "Mutant Transistor", 1, 6,
+        "mutant_8e1a2aba", "Mutant Transistor 2aba", 1, 6,
         {
         { A(1, TURN_W, 0), A(2, TURN_B, 0), A(3, TURN_N, 0), A(4, TURN_R, 0), A(5, TURN_W, 0), A(0, TURN_W, 0) }
         }
     },
     {
-        "mutant_1da977cd", "Mutant 1da977cd", 1, 6,
+        "noisefill_stripes_3", "stripes-3", 1, 6,
         {
         { A(1, TURN_B, 0), A(2, TURN_B, 0), A(3, TURN_N, 0), A(4, TURN_R, 0), A(5, TURN_W, 0), A(0, TURN_L, 0) }
         }
     },
     {
-        "mutant_5aef2e66", "Mutant 5aef2e66", 1, 6,
+        "noisefill_stripes_2", "stripes-2", 1, 6,
         {
         { A(1, TURN_B, 0), A(2, TURN_B, 0), A(3, TURN_N, 0), A(4, TURN_R, 0), A(5, TURN_L, 0), A(0, TURN_L, 0) }
         }
@@ -253,7 +253,7 @@ static const TurmiteRule RULES[] = {
         }
     },
     {
-        "mutant_1cc358d", "Mutant 1cc358d", 3, 3,
+        "stopper-33", "diagonal stopper 3-3", 3, 3,
         {
         { A(1, TURN_L, 0), A(0, TURN_L, 1), A(2, TURN_L, 0) },
         { A(1, TURN_L, 1), A(2, TURN_R, 0), A(2, TURN_F, 1) },
@@ -261,7 +261,7 @@ static const TurmiteRule RULES[] = {
         }
     },
     {
-        "mutant_3d099bfe", "Eww gross yuk", 2, 2,
+        "mutant_3d099bfe", "reversing turd dropper 2-2", 2, 2,
         {
         { A(0, TURN_R, 1), A(0, TURN_L, 0) },
         { A(1, TURN_L, 1), A(1, TURN_B, 0) }
@@ -273,6 +273,30 @@ static const TurmiteRule RULES[] = {
         { A(0, TURN_F, 2), A(0, TURN_R, 0) },
         { A(1, TURN_L, 0), A(0, TURN_R, 1) },
         { A(1, TURN_B, 2), A(1, TURN_R, 1) }
+        }
+    },
+    {
+        "novel_8737072d", "lord bug", 1, 4,
+        {
+        { A(1, TURN_R, 0), A(2, TURN_L, 0), A(3, TURN_L, 0), A(0, TURN_R, 0) }
+        }
+    },
+    {
+        "alex_8737072d", "lady bug", 1, 4,
+        {
+        { A(1, TURN_R, 0), A(2, TURN_R, 0), A(3, TURN_L, 0), A(0, TURN_L, 0) }
+        }
+    },
+    {
+        "alex_8737072d_invert", "lady bug inverted", 1, 4,
+        {
+        { A(1, TURN_L, 0), A(2, TURN_L, 0), A(3, TURN_R, 0), A(0, TURN_R, 0) }
+        }
+    },
+    {
+        "phonelines1", "phonelines-1", 1, 4,
+        {
+        { A(2, TURN_R, 0), A(0, TURN_L, 0), A(1, TURN_R, 0), A(0, TURN_H, 0) }
         }
     }
 };

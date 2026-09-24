@@ -31,15 +31,17 @@ Normal dispatch threshold: `min(min_service, quantum, floor(capacity))`. Grant: 
 
 ## Collisions and mutation
 
+Collision-induced mutation is disabled by default; enable it with `-M` / `--collision-mutation`. This setting applies to every universe and survives restarts. Collision stopping, the recovery pause, and residency waiting apply in both modes. HALT rebirth is unchanged.
+
 Occupancy byte: 0 = empty, 1–32 = ant index + 1. Movement conditionally releases the source, then CAS-claims the destination. Greater token balance wins; ties favor lower universe slot, then lower ant index. A winning challenger replaces the resident.
 
 1. Mark loser `CLOBBERED | DISPLACED`.
 2. Stop at an instruction boundary and release lease. Failed claims end the grant immediately; an in-flight resident instruction may finish.
 3. Wait 50 ms from the first idle recovery scan.
-4. Change exactly one field in one private rule action: probability 1/16 toggles HALT; otherwise change a mutable write, turn, or next-state field to another valid value.
+4. With collision mutation enabled, change exactly one field in one private rule action: probability 1/16 toggles HALT; otherwise change a mutable write, turn, or next-state field to another valid value.
 5. Set `WAITING` until the retained cell can be reclaimed. Occupied cells extend the wait without repeated mutation or teleportation.
 
-Collision mutation preserves dimensions, position, heading, state, rate, capacity, weight, balance, and fair credit. RNG and mutation counter advance; ordinary refill and draining continue. Clear the old event before reclaim so a new collision remains pending. Mutate only unleased ants.
+Collision mutation preserves dimensions, position, heading, state, rate, capacity, weight, balance, and fair credit. With mutation enabled, RNG and mutation counter advance; otherwise the rule and its RNG remain unchanged; ordinary refill and draining continue. Clear the old event before reclaim so a new collision remains pending. Mutate only unleased ants.
 
 ## HALT rebirth
 
@@ -52,14 +54,14 @@ HALT takes precedence over a simultaneous collision. At the retained position, g
 | Write, turn, next state | Valid random values |
 | HALT | Probability 1/64 per action |
 
-HALT is the exception to collision-only runtime variation. Cloning copies existing rules without mutation. Runtime tables are private per slot and omitted from dumps.
+HALT is the exception to collision-only runtime variation. New spawns choose a library rule independently. Runtime tables are private per slot and omitted from dumps.
 
 ## Population
 
-- **Double:** up to 32; repeatedly clone the healthiest eligible, non-leased source. Inherit rule, heading, state, rate, capacity, weight; assign new RNG stream, random empty position, full bucket. New clones can become sources in the same request.
+- **Spawn (`+`):** add exactly one ant, up to 32. Select a random library rule and independently randomize heading, state, color offset, rate, capacity, weight, RNG stream, and empty position. Start with a full bucket. Existing ants, including leased or mutated ants, are unchanged. No parent is selected.
 - **Halve:** select weak, enabled, non-leased, non-draining ants; set generation to zero. Retire below one token, release occupancy, decrement population.
-- Requests are best-effort under active leases. Collision mutation preserves draining; HALT clears it. Intermediate counts may be arbitrary.
-- Initial placement uses bounded random probes; callers currently assume success.
+- Spawning succeeds independently of existing leases; a full slot table or occupied world rejects it without increasing population. Spawning is disabled during debug drain and stop. Halving remains best-effort under active leases. Collision mutation preserves draining; HALT clears it. Intermediate counts may be arbitrary.
+- Placement tries at most 32 random positions, then scans the world once from a random starting cell. Spawn reports placement failure; reused slots reset counters, credit, and recovery timestamps.
 
 ## Randomness and lifecycle
 
@@ -71,7 +73,7 @@ Instruction/mutation counters accumulate per slot across HALT rebirths within a 
 
 ## Limits
 
-- One-second accrual clamp can discard refill time, especially at large divisors.
+- Refill retains elapsed time across long sleeps and saturates safely for extreme rate scales. Q16 truncation can defer an exact refill boundary slightly.
 - No rule-driven scheduling fields, alternative scheduler policy, or gene-pool archive.
 - Live captures are observational; see [dump limitations](DEBUGGING.md).
 - [STM32 integration](stm32/INTEGRATION.md) remains unimplemented.

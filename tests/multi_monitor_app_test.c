@@ -114,7 +114,7 @@ static void run_case(bool windowed, int only, bool hud, const char *const *optio
     expected_windows = only < 0 ? 2 : 1;
     char *args[20] = {"turmite", "--dump-pages", "1", "--width", "160", "--height", "120"};
     int argc = 7;
-    expected_cell_size = 1;
+    expected_cell_size = DEFAULT_CELL_SIZE;
     for (size_t i = 0; options[i]; ++i)
         if (!strcmp(options[i], "-c") || !strcmp(options[i], "--cell-size"))
             expected_cell_size = atoi(options[i + 1]);
@@ -134,12 +134,14 @@ int main(void)
     alarm(20);
     run_case(true, 0, false, (const char *[]){NULL});
     run_case(true, 0, true, (const char *[]){"--hud", NULL});
+    run_case(true, 0, false, (const char *[]){"--collision-mutation", NULL});
+    run_case(false, -1, false, (const char *[]){"-A", "-M", NULL});
     run_case(false, 0, false, (const char *[]){"--fullscreen", NULL});
     run_case(false, 1, true, (const char *[]){"-F", "-p1", "-u", NULL});
     run_case(false, -1, false, (const char *[]){"--fullscreen-all", NULL});
     run_case(false, -1, false, (const char *[]){"-p1", "-A", NULL});
     run_case(false, -1, false, (const char *[]){"-A", "-p1", NULL});
-    run_case(true, 1, false, (const char *[]){"-A", "-p1", "-W", "-u", "-n", NULL});
+    run_case(true, 1, false, (const char *[]){"-A", "-p1", "-W", NULL});
     run_case(false, 1, false, (const char *[]){"-p1", "-A", "-F", NULL});
     for (int size = 1; size <= 10; ++size) {
         char number[4];

@@ -30,7 +30,7 @@ typedef enum {
 
 typedef struct {
     uint8_t write_color;
-    TurnCode turn;
+    uint8_t turn; /* TurnCode; byte storage keeps each action four bytes. */
     uint8_t next_state;
     bool halt;
 } RuleAction;

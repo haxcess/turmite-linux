@@ -69,7 +69,7 @@ static void place(AntColony *colony, Ant *ant, unsigned x, unsigned y)
     atomic_store(&ant->state,0);
 }
 
-static void collisions(void)
+static void collisions(bool mutation)
 {
     World world;AntColony colony;Scheduler scheduler;Lfsr32 rng;
     assert(world_init(&world,16,16)==0);assert(ant_colony_init(&colony,&world)==0);
@@ -81,6 +81,8 @@ static void collisions(void)
     atomic_fetch_or(&loser->flags,ANT_F_LEASED | ANT_F_DRAINING);
     atomic_store(&loser->token_rate,0);
     assert(scheduler_init(&scheduler,&colony,SCHED_WFQ,790)==0);
+    assert(!scheduler.collision_mutation);
+    if (mutation) scheduler.collision_mutation = true;
     assert(ant_execute_quantum(loser,&colony,&world,100)==1);
     assert(atomic_load(&loser->flags)&ANT_F_CLOBBERED);
     assert(ant_position_x(&colony,0)==3 && ant_occupant_at(&colony,3,2)==2);
@@ -92,13 +94,20 @@ static void collisions(void)
     const unsigned heading=atomic_load(&loser->heading), state=atomic_load(&loser->state);
     const unsigned capacity=atomic_load(&loser->token_capacity_fp),weight=atomic_load(&loser->weight);
     scheduler.fair_credit[0]=12.5;const uint64_t last=scheduler.last_token_us[0];
+    const TurmiteRule *original_rule=loser->rule;
+    const uint32_t original_rng=loser->rng_state;
     TurmiteRule before=*loser->rule;
     recover_ant(&scheduler,loser,1000);
     recover_ant(&scheduler,loser,1000+COLLISION_PAUSE_US-1);
     assert(changes(&before,loser->rule)==0);
     recover_ant(&scheduler,loser,1000+COLLISION_PAUSE_US);
-    assert(changes(&before,loser->rule)==1 && ant_mutation_count(&colony,0)==1);
-    assert(loser->rule==&colony.runtime_rules[0]);
+    assert(changes(&before,loser->rule)==(unsigned)mutation);
+    assert(ant_mutation_count(&colony,0)==(unsigned)mutation);
+    if (mutation) assert(loser->rule==&colony.runtime_rules[0]);
+    else {
+        assert(loser->rule==original_rule && loser->rng_state==original_rng);
+        assert(memcmp(&before,loser->rule,sizeof(before))==0);
+    }
     assert(atomic_load(&loser->flags)&ANT_F_WAITING);assert(!runnable(loser));
     assert(atomic_load(&loser->flags)&ANT_F_DRAINING);
     assert(ant_packed_position(&colony,0)==pos && atomic_load(&loser->heading)==heading && atomic_load(&loser->state)==state);
@@ -126,7 +135,7 @@ static void collisions(void)
     ant_colony_destroy(&colony);world_destroy(&world);
 }
 
-static void halts_and_clones(void)
+static void halts_and_spawns(void)
 {
     World w;AntColony c;Scheduler scheduler;Lfsr32 rng;
     assert(world_init(&w,16,16)==0);assert(ant_colony_init(&c,&w)==0);rng_seed(&rng,123);
@@ -147,13 +156,18 @@ static void halts_and_clones(void)
     assert(atomic_load(&a->state)<a->rule->states && atomic_load(&a->heading)<4);
     assert(ant_packed_position(&c,0)==((8u<<16)|8u));
     assert(ant_mutation_count(&c,0)==0 && atomic_load(&c.collisions)==0);
-    /* Deep clone: future edits of either table cannot affect its sibling. */
-    ant_clone(&c.ants[1],&c,a,&w,&rng);
-    assert(c.ants[1].rule!=a->rule && changes(c.ants[1].rule,a->rule)==0);
-    TurmiteRule snapshot=*c.ants[1].rule;
+    /* New arrivals come from the library, never the parent's runtime table. */
+    atomic_store(&c.active_population, 1);
+    assert(scheduler_spawn_ant(&scheduler,&w,&rng,2000)==1);
+    assert(scheduler_active_population(&scheduler)==2);
+    Ant *fresh=&c.ants[1];
+    assert(ant_rule_index(fresh)<rules_count());
+    assert(fresh->rule==rules_get(ant_rule_index(fresh)) && fresh->rule!=a->rule);
+    TurmiteRule snapshot=*fresh->rule;
     ant_mutate_in_place(a,&c);
-    assert(changes(&snapshot,c.ants[1].rule)==0 && changes(a->rule,c.ants[1].rule)==1);
-    ant_mutate_in_place(&c.ants[1],&c);valid(c.ants[1].rule);
+    assert(changes(&snapshot,fresh->rule)==0);
+    ant_mutate_in_place(fresh,&c);valid(fresh->rule);
+    assert(fresh->rule==&c.runtime_rules[1] && fresh->rule!=a->rule);
     scheduler_destroy(&scheduler);ant_colony_reset(&c);
     ant_randomize(a,&c,&w,&rng,rules_get(0));
     assert(a->rule==rules_get(0) && ant_rule_index(a)==0); /* reset returns to catalogue */
@@ -162,6 +176,6 @@ static void halts_and_clones(void)
 
 int main(void)
 {
-    generation();collisions();halts_and_clones();
-    puts("mutation ok: single edits, biased complexity, collision stop/pause/resume, HALT rebirth, clone isolation, catalogue reset");
+    generation();collisions(false);collisions(true);halts_and_spawns();
+    puts("mutation ok: single edits, biased complexity, collision stop/pause/resume, HALT rebirth, spawn independence, catalogue reset");
 }

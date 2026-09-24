@@ -27,10 +27,11 @@ Host ABI measurements (`make struct-report`):
 
 | Object | Bytes |
 | --- | ---: |
-| `Ant` | 40 |
+| `Ant` | 64; each ant occupies its own cache line |
 | `AntStats` | 16 |
-| `AntColony` | 11,968, excluding occupancy allocation |
-| 32 private rules, included in colony | 9,984 |
+| `AntColony` | 6,592, excluding occupancy allocation |
+| `RuleAction` / `TurmiteRule` | 4 / 120 |
+| 32 private rules, included in colony | 3,840 |
 | 32 packed positions | 128; 64-byte alignment |
 | Scheduler recovery timestamps | 256 |
 
@@ -68,3 +69,22 @@ perf report -i perf-1w.data
 Requires Linux perf/counter permissions. Builds use `-O2 -g`. Benchmark excludes rendering and aggregate multi-monitor costs. Checked-in perf reports are [historical](history/OPTIMIZATION_NOTES.md).
 
 [Comparison procedures](EXPERIMENTS.md)
+
+## Current optimization checks
+
+`make execution-bench` runs fixed work across every library rule and reports CPU
+nanoseconds per instruction plus a deterministic tape/machine-state hash.
+`make contention-bench` isolates adjacent-ant cache contention with two stationary
+machines. `make worker-idle-test` reports CPU time and scheduler scans over an idle
+200 ms interval, then checks pause/resume, configuration, membership, and shutdown.
+These complement the timed scheduler benchmark; rate-limited instruction counts
+alone do not measure interpreter speed or CPU efficiency.
+
+Ant token balance remains atomic and is published every instruction, but the
+lease guarantees a single writer, allowing a store instead of a locked decrement.
+Dispatch and completed-instruction counters likewise use atomic loads/stores
+under the scheduler mutex. Rule actions store byte turn codes; 64-byte aligned
+ants isolate neighboring workers' token/flag traffic. Allocate containing objects
+with their declared alignment (as the Linux and Android hosts already do).
+
+[Measured results and validation](PERFORMANCE_REVIEW.md)

@@ -30,7 +30,8 @@ make
 | `-g`, `--glitter N` | Startup confetti; required integer 1–10; disabled when omitted |
 | `-c`, `--cell-size N` | 1; integer pixels per cell, 1–10 |
 | `-m`, `--minutes N` | 0.4 (24 seconds); positive restart interval |
-| `-u`, `--hud`; `-n`, `--no-hud` | Show/hide HUD; hidden by default |
+| `-u`, `--hud` | Show HUD; hidden by default |
+| `-M`, `--collision-mutation` | Enable collision-induced rule mutation; disabled by default |
 | `-H`, `--headless` | One universe without SDL video initialization |
 | `-d`, `--dump-pages N` | 127; 1, 3, 7, …, 1023 |
 | `-i`, `--dump-interval N` | 1 second; positive |
@@ -39,7 +40,7 @@ make
 
 Values above follow source defaults and validation; current help text still lists older population, quantum, and lifetime values.
 
-Last mode (`-W`/`-F`/`-A`) and HUD flag win. `-A` ignores `-p`. Fullscreen uses monitor dimensions; application minimum is 160 × 120. Monitor discovery occurs at startup; no hotplug. Wayland controls normal-window placement.
+Last mode (`-W`/`-F`/`-A`) wins. `-A` ignores `-p`. Fullscreen uses monitor dimensions; application minimum is 160 × 120. Monitor discovery occurs at startup; no hotplug. Wayland controls normal-window placement.
 
 ```sh
 ./turmite -F -p 1 -u
@@ -67,7 +68,7 @@ Keys affect the focused universe.
 | Space | Pause/resume dispatch |
 | `[` / `]` | Decrease/increase quantum |
 | `-` | Request population halving through token drain |
-| `+` / `=` | Request doubling, capped at 32 |
+| `+` / `=` | Spawn one random library ant, capped at 32 |
 | R | Clear and reseed |
 | H | Toggle HUD |
 | Q | Stop token refill, export PNG frames while remaining tokens drain, write final dump, close window |

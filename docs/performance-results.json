@@ -1,0 +1,380 @@
+[
+  {
+    "case": "execution_bench",
+    "args": [
+      "10000"
+    ],
+    "repeat": 0,
+    "version": "before",
+    "cpu_seconds": 1.59241,
+    "output": "instructions=97280000 hash=e8c616ee383a340f cpu_seconds=1.591847 ns_per_instruction=16.364"
+  },
+  {
+    "case": "execution_bench",
+    "args": [
+      "10000"
+    ],
+    "repeat": 0,
+    "version": "after",
+    "cpu_seconds": 1.1736739999999997,
+    "output": "instructions=97280000 hash=e8c616ee383a340f cpu_seconds=1.173167 ns_per_instruction=12.060"
+  },
+  {
+    "case": "execution_bench",
+    "args": [
+      "10000"
+    ],
+    "repeat": 1,
+    "version": "before",
+    "cpu_seconds": 1.6015959999999998,
+    "output": "instructions=97280000 hash=e8c616ee383a340f cpu_seconds=1.601035 ns_per_instruction=16.458"
+  },
+  {
+    "case": "execution_bench",
+    "args": [
+      "10000"
+    ],
+    "repeat": 1,
+    "version": "after",
+    "cpu_seconds": 1.158144,
+    "output": "instructions=97280000 hash=e8c616ee383a340f cpu_seconds=1.157570 ns_per_instruction=11.899"
+  },
+  {
+    "case": "execution_bench",
+    "args": [
+      "10000"
+    ],
+    "repeat": 2,
+    "version": "before",
+    "cpu_seconds": 1.5766150000000012,
+    "output": "instructions=97280000 hash=e8c616ee383a340f cpu_seconds=1.575326 ns_per_instruction=16.194"
+  },
+  {
+    "case": "execution_bench",
+    "args": [
+      "10000"
+    ],
+    "repeat": 2,
+    "version": "after",
+    "cpu_seconds": 1.1585680000000012,
+    "output": "instructions=97280000 hash=e8c616ee383a340f cpu_seconds=1.157954 ns_per_instruction=11.903"
+  },
+  {
+    "case": "contention_bench",
+    "args": [],
+    "repeat": 0,
+    "version": "before",
+    "cpu_seconds": 1.3466799999999999,
+    "output": "ant_bytes=48 seconds=0.742003"
+  },
+  {
+    "case": "contention_bench",
+    "args": [],
+    "repeat": 0,
+    "version": "after",
+    "cpu_seconds": 0.5147720000000007,
+    "output": "ant_bytes=64 seconds=0.258126"
+  },
+  {
+    "case": "contention_bench",
+    "args": [],
+    "repeat": 1,
+    "version": "before",
+    "cpu_seconds": 1.0880649999999994,
+    "output": "ant_bytes=48 seconds=0.669578"
+  },
+  {
+    "case": "contention_bench",
+    "args": [],
+    "repeat": 1,
+    "version": "after",
+    "cpu_seconds": 0.5253130000000007,
+    "output": "ant_bytes=64 seconds=0.263021"
+  },
+  {
+    "case": "contention_bench",
+    "args": [],
+    "repeat": 2,
+    "version": "before",
+    "cpu_seconds": 1.9813379999999994,
+    "output": "ant_bytes=48 seconds=1.058047"
+  },
+  {
+    "case": "contention_bench",
+    "args": [],
+    "repeat": 2,
+    "version": "after",
+    "cpu_seconds": 0.5400650000000004,
+    "output": "ant_bytes=64 seconds=0.275366"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "16",
+      "16"
+    ],
+    "repeat": 0,
+    "version": "before",
+    "cpu_seconds": 1.7916010000000013,
+    "output": "ants=32 workers=1 quantum=256 min_service=16 rate_scale=16 seconds=2.000 instructions=93900068 dispatches=1171024 avg_exec_per_dispatch=80.19 avg_grant=80.23 empty_scans=190 idle_waits=190 collisions=1137 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "16",
+      "16"
+    ],
+    "repeat": 0,
+    "version": "after",
+    "cpu_seconds": 1.6378939999999966,
+    "output": "ants=32 workers=1 quantum=256 min_service=16 rate_scale=16 seconds=2.000 instructions=110977033 dispatches=1764421 avg_exec_per_dispatch=62.90 avg_grant=62.92 empty_scans=332 idle_waits=332 collisions=1126 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "16",
+      "16"
+    ],
+    "repeat": 1,
+    "version": "before",
+    "cpu_seconds": 1.8300500000000026,
+    "output": "ants=32 workers=1 quantum=256 min_service=16 rate_scale=16 seconds=2.000 instructions=97689434 dispatches=1213169 avg_exec_per_dispatch=80.52 avg_grant=80.56 empty_scans=151 idle_waits=151 collisions=1124 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "16",
+      "16"
+    ],
+    "repeat": 1,
+    "version": "after",
+    "cpu_seconds": 1.4955050000000016,
+    "output": "ants=32 workers=1 quantum=256 min_service=16 rate_scale=16 seconds=2.000 instructions=98854557 dispatches=1614308 avg_exec_per_dispatch=61.24 avg_grant=61.26 empty_scans=466 idle_waits=466 collisions=1129 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "16",
+      "16"
+    ],
+    "repeat": 2,
+    "version": "before",
+    "cpu_seconds": 1.6891069999999968,
+    "output": "ants=32 workers=1 quantum=256 min_service=16 rate_scale=16 seconds=2.000 instructions=89511652 dispatches=1164467 avg_exec_per_dispatch=76.87 avg_grant=76.91 empty_scans=284 idle_waits=284 collisions=1139 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "16",
+      "16"
+    ],
+    "repeat": 2,
+    "version": "after",
+    "cpu_seconds": 1.4639690000000016,
+    "output": "ants=32 workers=1 quantum=256 min_service=16 rate_scale=16 seconds=2.000 instructions=99853609 dispatches=1620304 avg_exec_per_dispatch=61.63 avg_grant=61.65 empty_scans=497 idle_waits=497 collisions=1135 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "2",
+      "1",
+      "16"
+    ],
+    "repeat": 0,
+    "version": "before",
+    "cpu_seconds": 1.6554339999999992,
+    "output": "ants=32 workers=2 quantum=256 min_service=16 rate_scale=1 seconds=2.000 instructions=24223645 dispatches=394914 avg_exec_per_dispatch=61.34 avg_grant=61.42 empty_scans=16374 idle_waits=16374 collisions=942 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "2",
+      "1",
+      "16"
+    ],
+    "repeat": 0,
+    "version": "after",
+    "cpu_seconds": 1.4943830000000002,
+    "output": "ants=32 workers=2 quantum=256 min_service=16 rate_scale=1 seconds=2.000 instructions=24353461 dispatches=434754 avg_exec_per_dispatch=56.02 avg_grant=56.09 empty_scans=17370 idle_waits=17370 collisions=942 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "2",
+      "1",
+      "16"
+    ],
+    "repeat": 1,
+    "version": "before",
+    "cpu_seconds": 1.6070840000000004,
+    "output": "ants=32 workers=2 quantum=256 min_service=16 rate_scale=1 seconds=2.000 instructions=24476347 dispatches=392001 avg_exec_per_dispatch=62.44 avg_grant=62.52 empty_scans=16292 idle_waits=16292 collisions=935 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "2",
+      "1",
+      "16"
+    ],
+    "repeat": 1,
+    "version": "after",
+    "cpu_seconds": 1.4254339999999996,
+    "output": "ants=32 workers=2 quantum=256 min_service=16 rate_scale=1 seconds=2.000 instructions=23929303 dispatches=412552 avg_exec_per_dispatch=58.00 avg_grant=58.08 empty_scans=16488 idle_waits=16488 collisions=946 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "2",
+      "1",
+      "16"
+    ],
+    "repeat": 2,
+    "version": "before",
+    "cpu_seconds": 1.6379340000000038,
+    "output": "ants=32 workers=2 quantum=256 min_service=16 rate_scale=1 seconds=2.000 instructions=24211224 dispatches=406945 avg_exec_per_dispatch=59.50 avg_grant=59.56 empty_scans=18404 idle_waits=18404 collisions=949 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "2",
+      "1",
+      "16"
+    ],
+    "repeat": 2,
+    "version": "after",
+    "cpu_seconds": 1.401235000000003,
+    "output": "ants=32 workers=2 quantum=256 min_service=16 rate_scale=1 seconds=2.000 instructions=23221690 dispatches=391199 avg_exec_per_dispatch=59.36 avg_grant=59.43 empty_scans=16906 idle_waits=16906 collisions=960 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "1",
+      "1"
+    ],
+    "repeat": 0,
+    "version": "before",
+    "cpu_seconds": 1.3784629999999973,
+    "output": "ants=32 workers=1 quantum=256 min_service=1 rate_scale=1 seconds=2.000 instructions=21827900 dispatches=6529987 avg_exec_per_dispatch=3.34 avg_grant=3.34 empty_scans=577 idle_waits=577 collisions=924 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "1",
+      "1"
+    ],
+    "repeat": 0,
+    "version": "after",
+    "cpu_seconds": 1.482032000000002,
+    "output": "ants=32 workers=1 quantum=256 min_service=1 rate_scale=1 seconds=2.000 instructions=21955161 dispatches=7444136 avg_exec_per_dispatch=2.95 avg_grant=2.95 empty_scans=480 idle_waits=480 collisions=915 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "1",
+      "1"
+    ],
+    "repeat": 1,
+    "version": "before",
+    "cpu_seconds": 1.3245090000000022,
+    "output": "ants=32 workers=1 quantum=256 min_service=1 rate_scale=1 seconds=2.000 instructions=21676303 dispatches=6182354 avg_exec_per_dispatch=3.51 avg_grant=3.51 empty_scans=628 idle_waits=628 collisions=938 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "1",
+      "1"
+    ],
+    "repeat": 1,
+    "version": "after",
+    "cpu_seconds": 1.3163099999999974,
+    "output": "ants=32 workers=1 quantum=256 min_service=1 rate_scale=1 seconds=2.000 instructions=21630394 dispatches=6479082 avg_exec_per_dispatch=3.34 avg_grant=3.34 empty_scans=636 idle_waits=636 collisions=943 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "1",
+      "1"
+    ],
+    "repeat": 2,
+    "version": "before",
+    "cpu_seconds": 1.3801030000000032,
+    "output": "ants=32 workers=1 quantum=256 min_service=1 rate_scale=1 seconds=2.000 instructions=22570554 dispatches=6803506 avg_exec_per_dispatch=3.32 avg_grant=3.32 empty_scans=575 idle_waits=575 collisions=922 population=32"
+  },
+  {
+    "case": "bench",
+    "args": [
+      "32",
+      "256",
+      "2",
+      "1",
+      "1",
+      "1"
+    ],
+    "repeat": 2,
+    "version": "after",
+    "cpu_seconds": 1.4216640000000007,
+    "output": "ants=32 workers=1 quantum=256 min_service=1 rate_scale=1 seconds=2.000 instructions=21484671 dispatches=7100855 avg_exec_per_dispatch=3.03 avg_grant=3.03 empty_scans=535 idle_waits=535 collisions=937 population=32"
+  }
+]

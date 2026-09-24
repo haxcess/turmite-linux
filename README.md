@@ -1,6 +1,6 @@
 # Turmite Universe
 
-An academic art piece exploring multithreading, evolution, and cellular automata. Concurrent turmites draw on a shared six-color canvas. The implementation combines weighted scheduling, collision-driven rule mutation, batched execution, and constant-time collision lookup. Simulation runs independently of display refresh.
+An academic art piece exploring multithreading, evolution, and cellular automata. Concurrent turmites draw on a shared six-color canvas. The implementation combines weighted scheduling, optional collision-driven rule mutation (`--collision-mutation`), batched execution, and constant-time collision lookup. Simulation runs independently of display refresh.
 
 ## Run
 

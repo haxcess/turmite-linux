@@ -28,11 +28,11 @@ Converters retain no buffers. Caller supplies stable, sufficiently sized, non-ov
 
 ## Linux buffers
 
-Each controller targets 30 Hz, independently of workers. It samples one index frame, converts into one of three ARGB buffers, and publishes pixels plus HUD metadata under a short handoff mutex. Main presents the newest frame. Unread frames may be replaced; a frame held for presentation cannot be overwritten. Sampling, conversion, and uploads occur outside the handoff lock.
+Each controller targets 30 Hz, independently of workers. It samples one index frame, converts into one of three ARGB buffers, and publishes pixels plus HUD metadata under a short handoff mutex. Main presents the newest frame. Controllers post coalesced SDL user events when a frame becomes ready and when they finish; main blocks in `SDL_WaitEventTimeout` with a 100 ms fallback instead of polling every millisecond. Unread frames may be replaced; a frame held for presentation cannot be overwritten. Sampling, conversion, and uploads occur outside the handoff lock.
 
 Live sampling is non-transactional; HUD and image are sampled separately. `renderer_present()` consumes prepared pixels. The synchronous `renderer_render()` adapter instead allocates a conversion buffer lazily; the application does not use it. Headless mode has no display buffers.
 
-SDL events, uploads, window lifetime, and presentation stay on main. Fullscreen placement uses `SDL_WINDOWPOS_CENTERED_DISPLAY` for both coordinates; normal Wayland placement is compositor-controlled. Fullscreen requests visibility on focus loss. SDL shuts down after all windows close.
+SDL event consumption, uploads, window lifetime, and presentation stay on main. Controllers use only the thread-safe `SDL_PushEvent` notification API. Fullscreen placement uses `SDL_WINDOWPOS_CENTERED_DISPLAY` for both coordinates; normal Wayland placement is compositor-controlled. Fullscreen requests visibility on focus loss. SDL shuts down after all windows close.
 
 ## Palette
 

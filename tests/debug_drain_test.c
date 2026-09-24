@@ -54,7 +54,7 @@ int main(void)
     assert(!atomic_load(&s.paused) && !scheduler_drain_complete(&s));
     scheduler_set_paused(&s,true); assert(!atomic_load(&s.paused));
     Lfsr32 rng; rng_seed(&rng,456);
-    assert(scheduler_double_population(&s,&w,&rng,now)==0);
+    assert(scheduler_spawn_ant(&s,&w,&rng,now)==0);
     for(unsigned i=0;i<3;++i) assert(atomic_load(&c.ants[i].token_rate)==0);
     size_t executed=ant_execute_quantum(leased,&c,&w,grant);
     scheduler_release(&s,leased,executed,now+10000000);
@@ -93,5 +93,5 @@ int main(void)
     scheduler_release(&s,leased,executed,now);
     assert(scheduler_drain_complete(&s));
     destroy(&w,&c,&s);
-    puts("debug drain ok: finite budgets, partial batches, paused/in-flight, no cloning/refill, HALT/collision recovery");
+    puts("debug drain ok: finite budgets, partial batches, paused/in-flight, no spawning/refill, HALT/collision recovery");
 }

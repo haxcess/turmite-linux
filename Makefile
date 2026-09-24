@@ -1,5 +1,5 @@
 CC ?= cc
-CFLAGS ?= -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L
+CFLAGS ?= -O2 -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L
 CPPFLAGS += $(shell pkg-config --cflags sdl2 2>/dev/null)
 LDLIBS += $(shell pkg-config --libs sdl2 2>/dev/null)
 PNG_CFLAGS := $(shell pkg-config --cflags libpng)
@@ -66,30 +66,30 @@ perf-record-saturated: tests/bench
 perf-report: perf.data
 	perf report -i perf.data
 
-tests/bench: tests/bench.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c
-	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $^ -pthread -lm -o $@
+tests/bench: tests/bench.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c $(wildcard src/*.h)
+	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $(filter %.c,$^) -pthread -lm -o $@
 
 clean:
-	rm -f tests/debug_quit_app_test tests/debug_drain_test tests/worker_pool_test tests/worker_pool_test_tsan $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench tests/render_test tests/renderer_sdl_test tests/multi_window_test tests/multi_monitor_app_test tests/scheduler_capacity_test tests/rule_trace tests/rule-traces.js tools/export_rule_catalog tests/generated_rules_check.c tests/generated_rules_check tests/mutation_test tests/mutation_stress tests/mutation_stress_tsan
+	rm -f tests/contention_bench tests/spawn_test tests/execution_test tests/execution_bench tests/scheduler_deadline_test tests/worker_idle_test tests/debug_quit_app_test tests/debug_drain_test tests/worker_pool_test tests/worker_pool_test_tsan $(OBJ) $(OBJ:.o=.d) $(TARGET) tests/headless_smoke tests/headless_smoke_tsan tests/struct_sizes tests/bench tests/render_test tests/renderer_sdl_test tests/multi_window_test tests/multi_monitor_app_test tests/scheduler_capacity_test tests/rule_trace tests/rule-traces.js tools/export_rule_catalog tests/generated_rules_check.c tests/generated_rules_check tests/mutation_test tests/mutation_stress tests/mutation_stress_tsan
 
 core-test: tests/headless_smoke tests/scheduler_capacity_test tests/mutation_test
 	./tests/headless_smoke
 	./tests/mutation_test
 	./tests/scheduler_capacity_test
 
-tests/headless_smoke: tests/headless_smoke.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c
-	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $^ -pthread -lm -o $@
+tests/headless_smoke: tests/headless_smoke.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c $(wildcard src/*.h)
+	$(CC) -O2 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src $(filter %.c,$^) -pthread -lm -o $@
 
 tsan-test: tests/headless_smoke_tsan
 	TSAN_OPTIONS=halt_on_error=1 ./tests/headless_smoke_tsan
 
-tests/headless_smoke_tsan: tests/headless_smoke.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c
-	$(CC) -O1 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src -fsanitize=thread $^ -pthread -lm -o $@
+tests/headless_smoke_tsan: tests/headless_smoke.c src/rng.c src/rules.c src/world.c src/ant.c src/scheduler.c $(wildcard src/*.h)
+	$(CC) -O1 -g -std=c17 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L -I src -fsanitize=thread $(filter %.c,$^) -pthread -lm -o $@
 
 struct-report: tests/struct_sizes
 	./tests/struct_sizes
 
-tests/struct_sizes: tests/struct_sizes.c src/rules.c src/rules.h
+tests/struct_sizes: tests/struct_sizes.c src/rules.c src/rules.h $(wildcard src/*.h)
 	$(CC) -O2 -std=c17 -I src tests/struct_sizes.c src/rules.c -o $@
 
 # Portable rendering has no SDL or pthread dependency.
@@ -192,3 +192,35 @@ color-test:
 color-offset-test: color-test
 glitter-test: tests/multi_window_test
 	SDL_VIDEODRIVER=dummy ./tests/multi_window_test
+
+.PHONY: execution-test scheduler-deadline-test execution-bench
+execution-test: tests/execution_test
+	./tests/execution_test
+tests/execution_test: tests/execution_test.c src/ant.c src/world.c src/rng.c src/rules.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter %.c,$^) -o $@
+scheduler-deadline-test: tests/scheduler_deadline_test
+	./tests/scheduler_deadline_test
+tests/scheduler_deadline_test: tests/scheduler_deadline_test.c src/scheduler.c src/ant.c src/world.c src/rng.c src/rules.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter-out src/scheduler.c,$(filter %.c,$^)) -pthread -lm -o $@
+execution-bench: tests/execution_bench
+	./tests/execution_bench
+tests/execution_bench: tests/execution_bench.c src/ant.c src/world.c src/rng.c src/rules.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter %.c,$^) -o $@
+
+.PHONY: worker-idle-test
+worker-idle-test: tests/worker_idle_test
+	./tests/worker_idle_test
+tests/worker_idle_test: tests/worker_idle_test.c src/worker_pool.c src/scheduler.c src/ant.c src/world.c src/rng.c src/rules.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter %.c,$^) -pthread -lm -o $@
+
+.PHONY: spawn-test
+spawn-test: tests/spawn_test
+	./tests/spawn_test
+tests/spawn_test: tests/spawn_test.c src/scheduler.c src/ant.c src/world.c src/rng.c src/rules.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter %.c,$^) -pthread -lm -o $@
+
+.PHONY: contention-bench
+contention-bench: tests/contention_bench
+	./tests/contention_bench
+tests/contention_bench: tests/contention_bench.c src/ant.c src/world.c src/rng.c src/rules.c $(wildcard src/*.h)
+	$(CC) $(CFLAGS) -I src $(filter %.c,$^) -pthread -o $@

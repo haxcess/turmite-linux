@@ -35,11 +35,6 @@ uint32_t rng_uniform(Lfsr32 *rng, uint32_t upper_exclusive)
     return rng_next(rng) % upper_exclusive;
 }
 
-float rng_unit(Lfsr32 *rng)
-{
-    return (float)(rng_next(rng) / 4294967295.0);
-}
-
 /* Prefer kernel entropy for new universes; fall back to process/time values so
  * startup still works on constrained hosts. Explicit --seed bypasses this. */
 uint32_t rng_entropy_seed(void)

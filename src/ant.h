@@ -41,13 +41,12 @@ typedef struct AntColony AntColony;
  * internal state are owned by its worker while leased; token health remains
  * atomic because another worker may inspect it during collision resolution. */
 struct Ant {
+    /* Isolate per-instruction flag/token traffic from neighboring workers. */
+    alignas(64) const TurmiteRule *rule;
     _Atomic uint32_t flags;
+    _Atomic uint16_t rule_index;
     _Atomic uint8_t heading;
     _Atomic uint8_t state;
-    _Atomic uint8_t color_offset; /* local color zero, modulo TURMITE_COLORS */
-    _Atomic uint16_t rule_index;
-
-    const TurmiteRule *rule;
 
     _Atomic uint32_t tokens_fp;
     _Atomic uint32_t token_rate;
@@ -56,6 +55,7 @@ struct Ant {
 
     /* Per-ant LFSR removes contention on one shared runtime RNG. */
     uint32_t rng_state;
+    _Atomic uint8_t color_offset; /* local color zero, modulo TURMITE_COLORS */
 };
 
 typedef struct {
@@ -88,8 +88,9 @@ struct AntColony {
 int ant_colony_init(AntColony *colony, const World *world);
 void ant_colony_reset(AntColony *colony);
 void ant_colony_destroy(AntColony *colony);
-void ant_randomize(Ant *ant, AntColony *colony, const World *world, Lfsr32 *rng, const TurmiteRule *rule);
-void ant_clone(Ant *dst, AntColony *colony, const Ant *src, const World *world, Lfsr32 *rng);
+bool ant_randomize(Ant *ant, AntColony *colony, const World *world, Lfsr32 *rng, const TurmiteRule *rule);
+/* Fresh library rule and independent phenotype; false if no cell is available. */
+bool ant_spawn_random(Ant *ant, AntColony *colony, const World *world, Lfsr32 *rng);
 void ant_mutate_in_place(Ant *ant, AntColony *colony);
 void ant_rebirth_random(Ant *ant, AntColony *colony);
 uint16_t ant_rule_index(const Ant *ant);

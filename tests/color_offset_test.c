@@ -76,8 +76,8 @@ static void lifecycle(void)
         Ant *a=&c.ants[0]; ant_randomize(a,&c,&w,&rng,rules_get(0));
         unsigned offset=atomic_load(&a->color_offset);
         assert(offset<TURMITE_COLORS); seen |= 1u<<offset;
-        ant_clone(&c.ants[1],&c,a,&w,&rng);
-        assert(atomic_load(&c.ants[1].color_offset)==offset);
+        assert(ant_spawn_random(&c.ants[1],&c,&w,&rng));
+        assert(atomic_load(&c.ants[1].color_offset)<TURMITE_COLORS);
         ant_mutate_in_place(a,&c);
         assert(atomic_load(&a->color_offset)==offset);
         ant_rebirth_random(a,&c);
@@ -94,5 +94,5 @@ static void lifecycle(void)
 int main(void)
 {
     mappings(); langton_translation(); lifecycle();
-    puts("color offsets ok: all sizes/offsets/colors, fallback, translated Langton traces, spawn/clone/mutate/rebirth");
+    puts("color offsets ok: all sizes/offsets/colors, fallback, translated Langton traces, spawn/mutate/rebirth");
 }

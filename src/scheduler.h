@@ -19,12 +19,26 @@ typedef enum {
     SCHED_WFQ = 0
 } SchedulerPolicy;
 
+/* Shared wake event. Lock order: scheduler -> event; never hold event.lock
+ * while acquiring a scheduler or pool lock. Registration is scheduler-owned. */
+typedef struct {
+    pthread_mutex_t lock;
+    pthread_cond_t changed;
+    _Atomic unsigned waiters;
+    uint64_t generation;
+} SchedulerWake;
+
+void scheduler_wake_event(SchedulerWake *wake);
+
 typedef struct {
     /* Linux synchronization protects leases and fair-credit bookkeeping. */
     pthread_mutex_t lock;
     pthread_cond_t work_available;
     AntColony *colony;
     SchedulerPolicy policy;
+    SchedulerWake *wake; /* registered pool event, protected by lock */
+    uint64_t next_wake_us; /* next token/recovery deadline; UINT64_MAX = event only */
+    bool collision_mutation; /* configure before workers start; default false */
     bool stopping;
     bool draining; /* lock-owned: debug quit forbids all new token creation */
     _Atomic bool paused;
@@ -73,10 +87,11 @@ void scheduler_begin_drain(Scheduler *scheduler);
 /* True only once no enabled ant or outstanding lease can execute more work. */
 bool scheduler_drain_complete(Scheduler *scheduler);
 
-/* Population changes are expressed as scheduler policy: doubling clones healthy
- * ants into free slots, while halving marks weak ants to drain naturally. */
-int scheduler_double_population(Scheduler *scheduler, World *world, Lfsr32 *rng, uint64_t now_us);
-int scheduler_begin_halving(Scheduler *scheduler, size_t target_population);
+/* Add exactly one independent random library ant. Returns 1 on success, 0
+ * when stopped/draining, full, or unable to claim a cell. Safe with active leases. */
+int scheduler_spawn_ant(Scheduler *scheduler, World *world, Lfsr32 *rng, uint64_t now_us);
+/* Culling marks weak ants to drain naturally. */
+int scheduler_begin_culling(Scheduler *scheduler, size_t target_population);
 size_t scheduler_active_population(const Scheduler *scheduler);
 
 #endif

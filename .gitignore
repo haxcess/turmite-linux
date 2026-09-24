@@ -7,7 +7,7 @@ src/*.d
 # working folders
 /patches/
 /turmite-dumps/
-/tests/
+
 # Rule-lab build and test products
 /tools/export_rule_catalog
 /tools/rule-catalog.js.tmp

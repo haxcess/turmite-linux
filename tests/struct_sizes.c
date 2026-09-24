@@ -1,7 +1,11 @@
 #include "ant.h"
+#include "scheduler.h"
 #include <stdio.h>
 #include <stddef.h>
 int main(void) {
+    printf("sizeof(RuleAction)=%zu\n", sizeof(RuleAction));
+    printf("sizeof(TurmiteRule)=%zu\n", sizeof(TurmiteRule));
+    printf("sizeof(Scheduler)=%zu\n", sizeof(Scheduler));
     printf("sizeof(Ant)=%zu\n", sizeof(Ant));
     printf("sizeof(AntStats)=%zu\n", sizeof(AntStats));
     printf("sizeof(AntColony)=%zu\n", sizeof(AntColony));

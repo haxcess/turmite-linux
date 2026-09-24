@@ -5,11 +5,15 @@
 | Command | Coverage |
 | --- | --- |
 | `make core-test` | Two-worker smoke, final occupancy/population, capacity regression, deterministic mutation |
+| `make execution-test` | Independent reference interpreter: library/generated rules, turns, offsets, HALT, tiny worlds |
+| `make spawn-test` | Exactly one random library ant; occupied worlds, limits, active leases, recycled slots |
+| `make scheduler-deadline-test` | Refill deadlines, long sleeps, extreme scales, pause and recovery |
+| `make worker-idle-test` | Idle scan suppression and event/deadline wakeups |
 | `make capacity-test` | Dispatch thresholds and draining exemption |
-| `make mutation-test` | Collision recovery, blocked residency, HALT, clone isolation; eight-worker stress with population changes/captures |
+| `make mutation-test` | Collision recovery, blocked residency, HALT, spawn independence; eight-worker stress with population changes/captures |
 | `make mutation-tsan-test` | Mutation stress under ThreadSanitizer |
 | `make tsan-test` | Core smoke under ThreadSanitizer |
-| `make color-offset-test` | All rule sizes, cyclic offsets, unsupported colors, translated Langton traces and lifecycle inheritance |
+| `make color-offset-test` | All rule sizes, cyclic offsets, unsupported colors, translated Langton traces and randomized spawning and lifecycle |
 | `make boundary-test` | Edge crossings, seeded tube orientation, wall overlays, safe single-bit mutation |
 | `make debug-drain-test` | Finite token budgets, paused/in-flight work, small balances, HALT/collision recovery |
 | `make png-test` | Headless/SDL Q drain; one PNG per rendered frame, finite budget, final-page selection, palettes and export failure |
@@ -55,4 +59,4 @@ Stage, commit, and publish manually.
 
 Boundary stress: build `tests/mutation_stress`, then run it with `bouncy` or
 `radioactive` to exercise those box modes with eight workers and concurrent
-cloning, halving, and capture. No argument retains the original toroid stress.
+spawning, halving, and capture. No argument retains the original toroid stress.
