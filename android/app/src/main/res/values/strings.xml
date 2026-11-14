@@ -9,7 +9,8 @@
     <string name="ants">Ants</string>
     <string name="minutes">Universe lifetime (minutes)</string>
     <string name="divisor">Token-rate divisor</string>
+    <string name="pixel_size">Pixel size (screen pixels per cell)</string>
     <string name="setting_value">%1$s: %2$s</string>
-    <string name="settings_note">Saved automatically. Applies when preview or screensaver next starts. A larger divisor slows token refill.</string>
+    <string name="settings_note">Saved automatically. Applies when preview or screensaver next starts. A larger divisor slows token refill. Larger pixels make cells bigger. On large displays, cells may be enlarged to stay within the rendering limit.</string>
     <string name="done">Done</string>
 </resources>

@@ -1,0 +1,29 @@
+:root { --hue: 40; --ink: hsl(var(--hue) 95% 70%); --dim: hsl(var(--hue) 38% 60%); --line: hsl(var(--hue) 38% 60% / .28); }
+* { box-sizing: border-box; }
+body { margin: 0; background: #000; color: var(--ink); font: 12px/1.6 'Courier New', monospace; overflow: hidden; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+body::before, body::after { content: ''; position: fixed; inset: 0; pointer-events: none; }
+body::before { background: radial-gradient(ellipse at 50% 38%, transparent 30%, #000b 100%); }
+body::after { background: repeating-linear-gradient(0deg, transparent, transparent 2px, #0005 2px, #0001 4px); }
+header { position: fixed; inset: 18px 22px auto; display: flex; align-items: center; justify-content: space-between; letter-spacing: .2em; font-size: 10px; }
+.dim, .prompt, .foot { color: var(--dim); }
+button { font: inherit; color: inherit; cursor: pointer; background: #000b; border: 1px solid var(--line); padding: 5px 9px; }
+button:hover, button:focus-visible { background: hsl(var(--hue) 38% 20% / .65); border-color: var(--ink); outline: none; }
+#help { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 100px); overflow: auto; border: 1px solid var(--line); background: #000e; box-shadow: 0 0 60px hsl(var(--hue) 95% 70% / .08); transition: opacity .8s, visibility .8s; }
+#help.dismissed { opacity: 0; visibility: hidden; pointer-events: none; }
+.bar { display: flex; align-items: center; justify-content: space-between; padding: 7px 12px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 10px; background: hsl(var(--hue) 95% 70% / .07); }
+.bar button { padding: 0 5px; border: 0; font-size: 16px; }
+.body { padding: 16px 22px; }
+p { margin: 0 0 12px; }
+.intro { font-size: 11px; }
+.controls { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.controls button { text-align: left; font-size: 11px; border-color: transparent; padding: 4px 0; background: transparent; }
+kbd { display: inline-block; font: inherit; border: 1px solid var(--line); padding: 0 5px; min-width: 25px; text-align: center; }
+.foot { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 10px; }
+#stats, #notice { position: fixed; bottom: 18px; padding: 6px 10px; background: #000c; font-size: 11px; }
+#stats { left: 16px; white-space: pre-line; }
+#notice { right: 16px; max-width: calc(100vw - 32px); transition: opacity .4s; opacity: 0; }
+#notice.visible { opacity: 1; }
+noscript { position: fixed; top: 70px; left: 20px; }
+@media (max-width: 400px) { .body { padding: 12px; } .controls { gap: 4px; } header { inset: 12px 16px auto; } }
+@media (prefers-reduced-motion: reduce) { #help, #notice { transition: none; } }

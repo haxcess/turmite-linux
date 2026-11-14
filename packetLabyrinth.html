@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Packet Labyrinth | shibboleet.ca</title>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect fill='%23000' width='16' height='16'/><text x='1' y='13' fill='%23FFB000' font-size='13' font-family='monospace'>$_</text></svg>">
+    <style>
+        :root {
+            --r: 255;
+            --g: 176;
+            --b: 0;
+            --a: var(--r), var(--g), var(--b);
+            --c: rgb(var(--a));
+            --c8: rgba(var(--a), .8);
+            --c5: rgba(var(--a), .5);
+            --c3: rgba(var(--a), .3);
+            --c2: rgba(var(--a), .2);
+            --c1: rgba(var(--a), .1)
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        body {
+            background: #000;
+            color: var(--c);
+            font: 12px/1.6 'Courier New', Courier, monospace;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw
+        }
+
+        canvas {
+            position: fixed;
+            inset: 0;
+            z-index: 1
+        }
+
+        /* CRT vignette */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(ellipse at 50% 38%, transparent 30%, rgba(0, 0, 0, .72) 100%);
+            z-index: 2;
+            pointer-events: none
+        }
+
+        /* Scanlines */
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0, 0, 0, .45) 2px, rgba(0, 0, 0, .045) 4px);
+            z-index: 3;
+            pointer-events: none
+        }
+
+        /* Layout */
+        #ui {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            padding: 1rem
+        }
+
+        /* Terminal window */
+        .win {
+            width: min(580px, 96vw);
+            border: 1px solid var(--c3);
+            box-shadow: 0 0 60px rgba(var(--a), .08), 0 0 0 1px rgba(var(--a), .04), inset 0 1px 0 rgba(var(--a), .06)
+        }
+
+        .bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: .42rem .95rem;
+            border-bottom: 1px solid var(--c2);
+            background: rgba(var(--a), .07);
+            font-size: .64rem;
+            color: var(--c5);
+            letter-spacing: .06em;
+            user-select: none
+        }
+
+        .dots {
+            letter-spacing: .22em;
+            font-size: .55rem;
+            color: var(--c3)
+        }
+
+        .bd {
+            padding: 1.4rem 1.7rem 1.2rem;
+            background: rgba(0, 0, 0, .9)
+        }
+
+        /* Content */
+        h1 {
+            font-size: clamp(1.5rem, 5.5vw, 2.55rem);
+            letter-spacing: .38em;
+            text-shadow: 0 0 14px var(--c), 0 0 28px rgba(255, 110, 0, .5), 0 0 55px rgba(255, 80, 0, .18);
+            margin-bottom: .22rem;
+            font-weight: normal;
+            line-height: 1
+        }
+
+        .sub {
+            font-size: .6rem;
+            letter-spacing: .42em;
+            color: var(--c5);
+            margin-bottom: 1.25rem
+        }
+
+        .pr {
+            font-size: .72rem;
+            color: rgba(var(--a), .48);
+            margin-bottom: .18rem;
+            line-height: 1.4
+        }
+
+        .pr::before {
+            content: 'anon@shibboleet:~$ ';
+            color: rgba(var(--a), .35)
+        }
+
+        .out {
+            margin: .12rem 0 .85rem;
+            font-size: .78rem;
+            line-height: 1.8
+        }
+
+        .tag {
+            border: 1px solid var(--c2);
+            padding: .05rem .36rem;
+            margin: .1rem .06rem;
+            font-size: .62rem;
+            display: inline-block;
+            color: rgba(var(--a), .84);
+            transition: border-color .2s, color .2s
+        }
+
+        .tag:hover {
+            border-color: var(--c5);
+            color: var(--c)
+        }
+
+        .dim {
+            color: var(--c5)
+        }
+
+        /* Split-flap/LFSR decode in progress -- dimmer/desaturated than
+           resolved text; #mailReveal drops this class the instant it locks in. */
+        #mailReveal.decoding {
+            color: var(--c3)
+        }
+
+        a {
+            color: rgba(var(--a), .9);
+            text-decoration: none
+        }
+
+        a:hover {
+            text-shadow: 0 0 8px var(--c);
+            color: var(--c)
+        }
+
+        .foot {
+            margin-top: 1.1rem;
+            padding-top: .8rem;
+            border-top: 1px solid rgba(var(--a), .1);
+            font-size: .56rem;
+            color: rgba(var(--a), .26);
+            letter-spacing: .09em;
+            line-height: 2
+        }
+
+        /* Blinking cursor */
+        @keyframes blink {
+            50% {
+                opacity: 0
+            }
+        }
+
+        .cur {
+            display: inline-block;
+            animation: blink 1.08s step-end infinite
+        }
+
+        /* Responsive tightening */
+        @media(max-width:480px) {
+            .bd {
+                padding: 1rem 1.1rem .9rem
+            }
+
+            .bar {
+                padding: .35rem .7rem
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="c"></canvas>
+    <div id="ui">
+        <div class="win">
+            <div class="bar">
+                <span class="dots">■ ■ ■</span>
+                <span>packet labyrinth &mdash; controls</span>
+            </div>
+            <div class="bd">
+                <div class="pr">help</div>
+                <div class="out">
+                    <span class="tag">N</span> Nodes rebuild<br>
+                    <span class="tag">C</span> Connections rebuild<br>
+                    <span class="tag">W</span> Wind rebuild<br>
+                    <span class="tag">Scrollwheel</span> Wiggle the wind field<br>
+                    <span class="tag">Ctrl R</span> Refresh color theme<br>
+                </div>
+                <div class="foot">Controls remain active after this panel hides in 12 seconds.</div>
+            </div>
+        </div>
+    </div>
+</body>
+<script>
+    // ── Uptime ────────────────────────────────────────────────
+    // ── Canvas ────────────────────────────────────────────────
+    const cv = document.getElementById('c'), cx = cv.getContext('2d');
+    let W, H;
+    const rsz = () => { W = cv.width = innerWidth; H = cv.height = innerHeight };
+    rsz(); addEventListener('resize', rsz);
+
+    // ── Util ──────────────────────────────────────────────────
+    const R = n => Math.random() * n | 0;
+    const h4 = () => R(65536).toString(16).padStart(4, '0');
+    const h2 = n => n.toString(16).padStart(2, '0');
+    const ip4 = () => { // IP address builder from TEST-NET ranges in RFC5737
+        const t = R(3);
+        return t < 1 ? `203.0.113.${R(253) + 1}` :
+            t < 2 ? `198.51.100.${R(253) + 1}` :
+                `192.0.2.${R(253) + 1}`
+    };
+    const ip6 = () => `2001:db8::${h4()}:${h4()}:${h4()}:${h4()}`;
+    const mac = () => [0, 0, 0, 0, 0, 0].map(() => h2(R(256))).join(':');
+    const radiusPort = () => R(64511) + 1024;
+    const timeStamp = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${String(R(1e6)).padStart(6, '0')}` };
+
+    // ── Node types & hierarchy ──────────────────────────────────
+    const NODE_TYPES = ['RTR', 'FW', 'SW', 'SRV', 'AP', 'HST']; // also the connection build order
+    // How many of each node type to spawn, random between the range.
+    const COUNT_RANGE = { RTR: [5, 11], FW: [7, 11], SW: [11, 17], SRV: [11, 23], AP: [19, 31], HST: [19, 43] };
+    // How many uplinks each node type tries to draw (downlinks are implicit, since the child node owns the edge).
+    const LINKS_NEEDED = { RTR: 4, FW: 2, SW: 2, SRV: 1, AP: 1, HST: 1 };
+    // Connector rules by node type - the pool of eligible upstream nodes that a given node can connect to. 
+    const CAND_TYPES = { RTR: ['RTR'], FW: ['RTR', 'FW'], SW: ['FW', 'RTR', 'SW'], SRV: ['SW'], AP: ['SW', 'AP'], HST: ['AP', 'SW'] };
+    // Tether multiplier x wind-grid cell width = how far a node's leash lets it stray from its spawn anchor. 
+    const TETHER_MULT = { RTR: .3, FW: .3, SW: .3, SRV: .7, AP: .2, HST: 0.6 };
+    const NS = { RTR: 5, FW: 4.4, SW: 3.8, SRV: 3, AP: 3, HST: 2.4 }; // dot radius per type
+    const randRange = ([lo, hi]) => lo + R(hi - lo + 1);
+    // Color theme: base hue for the whole network, 
+    // then each type gets a small random offset from that base. .
+    const COLOR_THEME = R(360);
+    const TYPE_HUE = { 
+        RTR: COLOR_THEME-45+R(95), 
+         FW: COLOR_THEME-45+R(95), 
+         SW: COLOR_THEME-45+R(95), 
+        SRV: COLOR_THEME-45+R(95), 
+         AP: COLOR_THEME-45+R(95), 
+        HST: COLOR_THEME+45+R(95)
+     };
+    const NODE_SAT = 95, NODE_LIGHT = 70;
+    const LINE_SAT = 38, LINE_LIGHT = 60;
+    // Only the alpha varies frame-to-frame (pulse/distance-based) -- the
+    // hue/sat/light portion is fixed per type, so build that part once instead
+    // of re-running a template literal for every node and every edge, every
+    // frame. nodeColor/lineColor then just concatenate the alpha onto a
+    // pre-built string.
+    const NODE_COLOR_PREFIX = {}, LINE_COLOR_PREFIX = {};
+    for (const t of NODE_TYPES) {
+        NODE_COLOR_PREFIX[t] = `hsla(${TYPE_HUE[t]},${NODE_SAT}%,${NODE_LIGHT}%,`;
+        LINE_COLOR_PREFIX[t] = `hsla(${TYPE_HUE[t]},${LINE_SAT}%,${LINE_LIGHT}%,`;
+    }
+    const nodeColor = (t, a) => NODE_COLOR_PREFIX[t] + a + ')';
+    const lineColor = (t, a) => LINE_COLOR_PREFIX[t] + a + ')';
+
+    // ── Wind field: coarse Perlin-noise vectors, sampled at a moment `windT` ──
+    // Own permutation-table Perlin implementation (Ken Perlin's "improved
+    // noise" reference algorithm) -- no external noise library, keeps the page
+    // a single dependency-free file.
+    function buildPermutation() {
+        const p = new Uint8Array(256);
+        for (let i = 0; i < 256; i++)p[i] = i;
+        for (let i = 255; i > 0; i--) { const j = R(i + 1), tmp = p[i]; p[i] = p[j]; p[j] = tmp; }
+        const perm = new Uint8Array(512);
+        for (let i = 0; i < 512; i++)perm[i] = p[i & 255];
+        return perm;
+    }
+    let perm = buildPermutation();
+    const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+    const lerp = (t, a, b) => a + t * (b - a);
+    const grad = (hash, x, y, z) => {
+        const h = hash & 15, u = h < 8 ? x : y, v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+        return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+    };
+    function noise3(x, y, z) {
+        const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+        x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+        const u = fade(x), v = fade(y), w = fade(z);
+        const A = perm[X] + Y, AA = perm[A] + Z, AB = perm[A + 1] + Z, B = perm[X + 1] + Y, BA = perm[B] + Z, BB = perm[B + 1] + Z;
+        return lerp(w,
+            lerp(v, lerp(u, grad(perm[AA], x, y, z), grad(perm[BA], x - 1, y, z)),
+                lerp(u, grad(perm[AB], x, y - 1, z), grad(perm[BB], x - 1, y - 1, z))),
+            lerp(v, lerp(u, grad(perm[AA + 1], x, y, z - 1), grad(perm[BA + 1], x - 1, y, z - 1)),
+                lerp(u, grad(perm[AB + 1], x, y - 1, z - 1), grad(perm[BB + 1], x - 1, y - 1, z - 1))));
+    }
+
+    const GRID_COLS = 50; // "hundreds, not thousands" of cells -- coarse on purpose
+    let GRID_ROWS, windGrid = null, windT = Math.random() * 1000;
+    const WIND_T_STEP = .15, WIND_NOISE_SCALE = .35, WIND_DIR_Y_OFFSET = 500, WIND_MAG_OFFSET = 1000, MAX_WIND_MAG = 1;
+    function buildWindGrid() {
+        GRID_ROWS = Math.max(2, Math.round(GRID_COLS * (H / W)));
+        // Grid dimensions never change after the first call (nothing rebuilds
+        // them on resize), so this allocation branch only ever really runs
+        // once. Every subsequent W-press/scroll-tick reuses the same row
+        // arrays and cell objects and just overwrites vx/vy on them below --
+        // no repeated alloc/GC churn for what is otherwise the single most
+        // frequent trigger in the app (mousewheel).
+        if (!windGrid || windGrid.length !== GRID_ROWS + 1 || windGrid[0].length !== GRID_COLS + 1) {
+            windGrid = [];
+            for (let j = 0; j <= GRID_ROWS; j++) {
+                const row = [];
+                for (let i = 0; i <= GRID_COLS; i++)row.push({ vx: 0, vy: 0 });
+                windGrid.push(row);
+            }
+        }
+        for (let j = 0; j <= GRID_ROWS; j++) {
+            for (let i = 0; i <= GRID_COLS; i++) {
+                const nx = i * WIND_NOISE_SCALE, ny = j * WIND_NOISE_SCALE;
+                // Direction: two independent noise samples used as raw x/y
+                // components, then normalized -- NOT a single noise value mapped
+                // linearly to an angle. Noise hovers near its mean (0) far more
+                // than it swings to +-1, so angle=(noise+1)*PI clusters tightly
+                // around PI radians (due left in canvas coords) and rarely reaches
+                // 0/2PI (right) -- that's what was producing the "always blows
+                // left" bias. Two independent components + normalize has no
+                // preferred compass direction.
+                let dx = noise3(nx, ny, windT);
+                let dy = noise3(nx + WIND_DIR_Y_OFFSET, ny + WIND_DIR_Y_OFFSET, windT);
+                const dlen = Math.hypot(dx, dy) || 1;
+                dx /= dlen; dy /= dlen;
+                // Magnitude: independent sample again, own offset, same windT so it
+                // steps together with direction.
+                const mag = (noise3(nx + WIND_MAG_OFFSET, ny + WIND_MAG_OFFSET, windT) + 1) / 2 * MAX_WIND_MAG;
+                const cell = windGrid[j][i];
+                cell.vx = dx * mag; cell.vy = dy * mag;
+            }
+        }
+    }
+    // sampleWind is called once per node per frame while physics is active
+    // (up to ~130x/frame at 60fps). It used to return a fresh {vx,vy} object
+    // literal every call -- pure GC churn, since the caller (applyForces)
+    // only ever reads it immediately and never holds onto it. Reused here
+    // instead; safe because nothing keeps more than one sample alive at once.
+    const _windSample = { vx: 0, vy: 0 };
+    function sampleWind(x, y) {
+        const gx = (x / W) * GRID_COLS, gy = (y / H) * GRID_ROWS;
+        const i0 = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(gx)));
+        const j0 = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(gy)));
+        const tx = gx - i0, ty = gy - j0, i1 = i0 + 1, j1 = j0 + 1;
+        const c00 = windGrid[j0][i0], c10 = windGrid[j0][i1], c01 = windGrid[j1][i0], c11 = windGrid[j1][i1];
+        _windSample.vx = lerp(ty, lerp(tx, c00.vx, c10.vx), lerp(tx, c01.vx, c11.vx));
+        _windSample.vy = lerp(ty, lerp(tx, c00.vy, c10.vy), lerp(tx, c01.vy, c11.vy));
+        return _windSample;
+    }
+
+    // ── Nodes ─────────────────────────────────────────────────
+    // What fraction of nodes carry a visible id:ip label -- decided once at
+    // spawn per node (not re-rolled per frame). LABEL_WEIGHT is a per-type
+    // multiplier on LABEL_FRACTION, currently all equal at 1 -- bump a type's
+    // weight later to bias which tiers get labeled more/less without
+    // touching the base fraction. Clamped to 1 so a weight >1/LABEL_FRACTION
+    // just means "always label this type" rather than overflowing.
+    const LABEL_FRACTION = .35;
+    const LABEL_WEIGHT = { RTR: 2.5, FW: 0.8, SW: 1, SRV: 0.3, AP: 0.8, HST: 1.5 };
+
+    function makeNode(t, idx) {
+        const x = Math.random() * W, y = Math.random() * H;
+        const id = `${t}-${String(idx + 1).padStart(2, '0')}`;
+        const ip = Math.random() < .18 ? ip6() : ip4();
+        const hasLabel = Math.random() < Math.min(1, LABEL_FRACTION * LABEL_WEIGHT[t]); // rolled first --
+        // the concatenation below only fires for the fraction that actually needs it
+        return {
+            t, id, x, y, anchorX: x, anchorY: y, vx: 0, vy: 0,
+            tetherLength: TETHER_MULT[t] * (W / GRID_COLS),
+            upstream: [], downstream: [], degree: 0,
+            sz: NS[t], ph: Math.random() * 6.2832,
+            ip, ll: ip6(), mac: mac(), // for packet-capture flavor text
+            hasLabel,
+            label: hasLabel ? `${id}:${ip}` : null
+        };
+    }
+    let nd = [];
+    let particleGeneratingNodes = []; // cached node subset -- particle spawn points; rebuilt only when nd changes
+    function generateNodes() {
+        nd = [];
+        let idx = 0;
+        for (const t of NODE_TYPES) {
+            const count = randRange(COUNT_RANGE[t]);
+            for (let k = 0; k < count; k++)nd.push(makeNode(t, idx++));
+        }
+        particleGeneratingNodes = nd.filter(n => n.t === 'HST' || n.t === 'SRV'); // only these types spawn particles
+    }
+
+    // ── connectNearest(): pool = 3 nearest eligible candidates, draw up to
+    // `k` picks from that fixed pool without replacement, weighted toward the
+    // nearer ones. Never reaches past the 3 nearest even if k picks can't all
+    // be filled (see spec §4).
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    function connectNode(node) {
+        const types = CAND_TYPES[node.t];
+        const withDist = [];
+        for (const o of nd) { if (o !== node && types.includes(o.t)) withDist.push({ o, d: dist(node, o) }); } // O(N) scan to find all eligible candidates
+        if (!withDist.length) return;
+        withDist.sort((a, b) => a.d - b.d);
+        const remaining = withDist.slice(0, 3);
+        const need = LINKS_NEEDED[node.t];
+        for (let n = 0; n < need && remaining.length; n++) {
+            let totalW = 0;
+            const weights = remaining.map(r => { const w = 1 / Math.max(r.d, 1); totalW += w; return w; }); // weight = 1/d, clamped to avoid divide-by-zero
+            let roll = Math.random() * totalW, pick = 0;
+            for (; pick < weights.length - 1; pick++) {
+                roll -= weights[pick];
+                if (roll <= 0)
+                    break;
+            } // pick is now the index of the chosen candidate
+            const chosen = remaining[pick].o;
+            node.upstream.push(chosen); chosen.downstream.push(node);
+            remaining.splice(pick, 1);
+        }
+    }
+    function connectAll() {
+        for (const n of nd) { n.upstream = []; n.downstream = []; }
+        // Single O(N) pass to bucket by type, instead of nd.filter() once per
+        // type (6x nd.filter() = 6 full scans of the whole array to do what one
+        // scan can).
+        const byType = {};
+        for (const t of NODE_TYPES) byType[t] = [];
+        for (const n of nd) byType[n.t].push(n);
+        for (const t of NODE_TYPES) { // RTR -> FW -> SW -> SRV -> AP -> HST, per spec build order
+            const group = byType[t];
+            for (let i = group.length - 1; i > 0; i--) { const j = R(i + 1);[group[i], group[j]] = [group[j], group[i]]; } // shuffle
+            for (const n of group) connectNode(n);
+        }
+        for (const n of nd) n.degree = n.upstream.length + n.downstream.length;
+    }
+
+    // ── Physics: wind + attraction + tether spring-back, while the
+    // PHYSICS_DURATION window is active. Tunable constants up top for easy
+    // adjustment.
+    const K_ATTRACT = 100, MIN_ATTRACT_D = 200; // attraction: K/d^2, clamped near d=0
+    const K_TETHER = .16;                   // spring constant past tetherLength
+    const K_WIND = 2.2;                     // wind force multiplier
+    const DAMPING = .95, MAX_SPEED = 4;
+    // Steady-state force->velocity ratio implied by the damping recurrence above
+    // (v_ss = f*DAMPING/(1-DAMPING) for a constant force f) -- reused below by
+    // the particle steering system so it converges to a chosen cruise speed
+    // without introducing a second set of tuning constants.
+    const DAMPING_SS = DAMPING / (1 - DAMPING);
+
+    // Node-felt wind decay: the wind force nodes themselves feel dies off to 0
+    // within the first WIND_FELT_DECAY_FRAC of PHYSICS_DURATION, so the layout
+    // settles under attraction/tether alone for the remainder of the window.
+    // Cubic ease-out (1-t)^3: falls off hardest right away rather than
+    // lingering, and hits exactly 0 at the cutoff instead of asymptoting.
+    const WIND_FELT_DECAY_FRAC = .10;
+    let physicsStartTime = 0;
+    function windFeltFactor(now) {
+        const dur = PHYSICS_DURATION * WIND_FELT_DECAY_FRAC;
+        const t = (now - physicsStartTime) / dur;
+        if (t >= 1) return 0;
+        const k = 1 - Math.max(0, t);
+        return k * k * k;
+    }
+
+    function applyForces(n, windMult) {
+        let fx = 0, fy = 0;
+        const w = sampleWind(n.x, n.y);
+        fx += w.vx * K_WIND * windMult; 
+        fy += w.vy * K_WIND * windMult;
+        for (const nb of n.upstream) {
+            const dx = nb.x - n.x, 
+                  dy = nb.y - n.y, 
+                   d = Math.max(Math.hypot(dx, dy), MIN_ATTRACT_D);
+            const mag = K_ATTRACT / (d * d);
+            fx += mag * (dx / d); 
+            fy += mag * (dy / d);
+        }
+        const ax = n.x - n.anchorX, ay = n.y - n.anchorY, ad = Math.hypot(ax, ay);
+        if (ad > n.tetherLength) {
+            const excess = ad - n.tetherLength;
+            fx -= K_TETHER * excess * (ax / ad); 
+            fy -= K_TETHER * excess * (ay / ad);
+        }
+        n.vx = (n.vx + fx) * DAMPING; n.vy = (n.vy + fy) * DAMPING;
+        const sp = Math.hypot(n.vx, n.vy);
+        if (sp > MAX_SPEED) { 
+            n.vx = n.vx / sp * MAX_SPEED; 
+            n.vy = n.vy / sp * MAX_SPEED; 
+        }
+        n.x += n.vx; 
+        n.y += n.vy;
+    }
+
+    // ── Particles: HST/SRV-spawned motes that ride the wind hierarchy-ward
+    // (upstream, towards RTR), then hierarchy-outward (downstream, back
+    // towards the edge), then go feral (unconstrained drift) until they burn
+    // out. Deliberately its own function rather than reusing applyForces()
+    // wholesale -- particles need direction-aware wind reversal and a
+    // calibrated per-edge cruise speed that node physics has no concept of --
+    // but every constant it leans on (K_WIND, DAMPING, MAX_SPEED, DAMPING_SS,
+    // sampleWind, lerp, dist, R) is pulled straight from the systems above.
+    const PARTICLE_CAPACITY = 2000;          // token-bucket capacity == hard cap on live particles
+    const PARTICLE_SAT = 90, PARTICLE_LIGHT = 50; // brighter/more saturated than node dots -- "bright HST" theme
+    const PARTICLE_RADIUS = 1.6;
+    const PARTICLE_EDGE_DIST_SHORT = 40;     // px, guess at a "short hop" connection length
+    const PARTICLE_EDGE_DIST_LONG = 500;     // px, mirrors VISUAL_MAX_DIST's far-distance reference
+    const EDGE_TIME_MIN = .25, EDGE_TIME_MAX = 6; // seconds to traverse a short vs. long connection
+    // Wind vs. steering balance while streaming: pullAccel (below) comes out
+    // to roughly maxSpeed*9 by construction (see DAMPING_SS), which dwarfs a
+    // typical wind contribution (K_WIND * up to MAX_WIND_MAG=1 -- so ~2.2 at
+    // most) on every edge length. Particles were basically going dead
+    // straight regardless of wind as a result. These two knobs fix that
+    // together rather than just cranking wind up in isolation: boost what
+    // particles feel from the wind field, and ease off how hard they lock
+    // onto the target, so the two forces are actually comparable instead of
+    // one totally swamping the other. Net effect is more pronounced on long
+    // hops (lower maxSpeed -> lower pullAccel) than short ones, which reads
+    // as "short links are snappy, long-haul links wander" -- a nice
+    // side effect rather than something explicitly tuned for.
+    const PARTICLE_WIND_MULT = 4;    // multiplies K_WIND for particles only, on top of the node wind force
+    const PARTICLE_STEER_EASE = .7;  // multiplies pullAccel -- <1 loosens the lock onto the target
+    const ASSUME_FPS = 60;                   // frame-rate assumption, matches the rest of the file's per-frame (not per-second) constants
+    const REACH_PAD = 7;                     // px beyond a node's own radius that counts as "arrived"
+
+    let particles = [];
+    let particleTokens = 0, spawnRate = R(50), spawnRateTimer = 0;
+
+    // Escalates phase forward (never backward) whenever the current node has
+    // no list to travel along -- the "upstream[]/downstream[] empty" edge
+    // case from spec, folded into one place so both spawn and mid-route
+    // transitions go through it.
+    function settleParticlePhase(p) {
+        if (p.phase === 'up' && !p.currentNode.upstream.length) p.phase = 'down';
+        if (p.phase === 'down' && !p.currentNode.downstream.length) p.phase = 'drift';
+    }
+    // Calibrates cruise speed for the newly-chosen hop so short connections
+    // traverse in ~EDGE_TIME_MIN and long ones in ~EDGE_TIME_MAX, then derives
+    // the steering accel that converges to that speed under the *existing*
+    // DAMPING recurrence (see DAMPING_SS above) -- done once per hop, not
+    // per-frame, since CPU is the scarce resource here, not memory.
+    function calibrateEdge(p) {
+        const d = Math.max(dist(p, p.target), 1);
+        const norm = Math.min(1, Math.max(0, (d - PARTICLE_EDGE_DIST_SHORT) / (PARTICLE_EDGE_DIST_LONG - PARTICLE_EDGE_DIST_SHORT)));
+        const travelTime = lerp(norm, EDGE_TIME_MIN, EDGE_TIME_MAX);
+        p.maxSpeed = (d / travelTime) / ASSUME_FPS;
+        p.pullAccel = p.maxSpeed * DAMPING_SS;
+    }
+    function pickParticleTarget(p) {
+        const list = p.phase === 'up' ? p.currentNode.upstream : p.currentNode.downstream;
+        p.target = list[R(list.length)];
+        calibrateEdge(p);
+    }
+    function makeParticle() {
+        const home = particleGeneratingNodes[R(particleGeneratingNodes.length)];
+        const hue = TYPE_HUE[home.t] + (Math.random() - .5) * 30; // home node hue, splattered and shifted for variety
+        const p = {
+            x: home.x, y: home.y, vx: 0, vy: 0,
+            age: 0, maxLifeTime: (60 + Math.random() * 120) * 1000, // 60-180s, decided at spawn
+            phase: 'up', currentNode: home, target: null,
+            maxSpeed: MAX_SPEED, pullAccel: 0, brightness: 1,
+            colorPrefix: `hsla(${hue},${PARTICLE_SAT}%,${PARTICLE_LIGHT}%,`
+        };
+        // Phase-step fractions of maxLifeTime, noisy around the guiding
+        // thresholds (40% / 80% / 98%) but monotonically ordered.
+        p.t1 =                      .40 + (Math.random() - .5) * .06;
+        p.t2 = Math.max(p.t1 + .12, .80 + (Math.random() - .5) * .08);
+        p.t3 = Math.max(p.t2 + .06, .98 + (Math.random() - .5) * .02);
+        settleParticlePhase(p);
+        if (p.phase === 'up' || p.phase === 'down') pickParticleTarget(p);
+        return p;
+    }
+
+    // Token bucket: refills at `spawnRate` particles/sec (re-rolled via
+    // R(200) roughly once a second for bursty, organic spawn character
+    // rather than a metronomic one), capped at PARTICLE_CAPACITY tokens.
+    // Live particle count is separately capped at PARTICLE_CAPACITY too, so
+    // a long idle stretch banking tokens can't burst past the pool ceiling.
+    function spawnParticles(dt) {
+        spawnRateTimer += dt;
+        if (spawnRateTimer >= 1) { 
+            spawnRateTimer -= 1; 
+            spawnRate = R(50); 
+        }
+        particleTokens = Math.min(PARTICLE_CAPACITY, particleTokens + spawnRate * dt);
+        while (particleTokens >= 1 && particles.length < PARTICLE_CAPACITY) {
+            particleTokens -= 1;
+            particles.push(makeParticle());
+        }
+    }
+
+    // Returns false when the particle has aged out (caller removes it).
+    function updateParticle(p, dt) {
+        // Lifetime burns faster the faster the particle is currently moving --
+        // 1x at rest, up to 3x at its own cruise speed -- so busy motes die
+        // young and lazy ones linger, while still bounding out near maxLifeTime
+        // at minimum.
+        const speed = Math.hypot(p.vx, p.vy);
+        const burn = 1 + 2 * Math.min(1, speed / (p.maxSpeed || MAX_SPEED));
+        p.age += dt * 1000 * burn;
+        const ageFrac = p.age / p.maxLifeTime;
+        if (ageFrac >= 1) return false;
+
+        // Time-based phase transitions (the empty-list transitions happen at
+        // arrival, below).
+        if (p.phase === 'up' && ageFrac >= p.t1) {
+            p.phase = 'down'; settleParticlePhase(p);
+            if (p.phase === 'up' || p.phase === 'down') pickParticleTarget(p); else p.target = null;
+        } else if (p.phase === 'down' && ageFrac >= p.t2) {
+            p.phase = 'drift'; p.target = null;
+        }
+        if (p.phase !== 'dying' && ageFrac >= p.t3) p.phase = 'dying';
+
+        // Movement: streaming phases steer toward target and reverse any wind
+        // component that would push the particle backwards; drifting/dying let
+        // wind steer freely.
+        const w = sampleWind(p.x, p.y);
+        let wvx = w.vx, wvy = w.vy, fx = 0, fy = 0;
+        if (p.phase === 'up' || p.phase === 'down') {
+            const dx = p.target.x - p.x, dy = p.target.y - p.y;
+            const d = Math.max(Math.hypot(dx, dy), MIN_ATTRACT_D);
+            const dirx = dx / d, diry = dy / d;
+            if (wvx * dirx + wvy * diry < 0) {
+                 wvx = -wvx; 
+                 wvy = -wvy;
+                }
+                fx += wvx * K_WIND * PARTICLE_WIND_MULT + dirx * p.pullAccel * PARTICLE_STEER_EASE;
+                fy += wvy * K_WIND * PARTICLE_WIND_MULT + diry * p.pullAccel * PARTICLE_STEER_EASE;
+            } else { // drift/dying
+                fx += wvx * K_WIND * PARTICLE_WIND_MULT; fy += wvy * K_WIND * PARTICLE_WIND_MULT;
+        }
+        p.vx = (p.vx + fx) * DAMPING; p.vy = (p.vy + fy) * DAMPING;
+        const sp = Math.hypot(p.vx, p.vy), cap = p.maxSpeed || MAX_SPEED;
+        if (sp > cap) { p.vx = p.vx / sp * cap; p.vy = p.vy / sp * cap; }
+        p.x += p.vx; p.y += p.vy;
+
+        // Arrival: hop to the next upstream/downstream target, or fall through
+        // to drift if the new current node has nowhere left to go.
+        if ((p.phase === 'up' || p.phase === 'down') && Math.hypot(p.target.x - p.x, p.target.y - p.y) < p.target.sz + REACH_PAD) {
+            p.currentNode = p.target;
+            settleParticlePhase(p); // phase may change if the new node has no list to travel along
+            if (p.phase === 'up' || p.phase === 'down') pickParticleTarget(p); 
+            else p.target = null;
+        }
+
+        // Brightness: full while streaming, ages rapidly after drifting.
+        if (p.phase === 'up' || p.phase === 'down') p.brightness = 1;
+        else if (p.phase === 'drift') {
+            p.brightness = 1 - .4 * Math.min(1, (ageFrac - p.t2) / (p.t3 - p.t2));
+            p.age *= 1.01; // burn out quickly
+
+        }
+        else { //
+            const df = Math.min(1, (ageFrac - p.t3) / (1 - p.t3));// 
+            p.brightness = .6 * (1 - Math.sqrt(df));
+            //p.age += dt * 2000 * burn; // burn faster 
+
+        }
+
+        return true;
+    }
+
+    // ── Trigger actions (N / C / W / scroll) ────────────────────
+    let physicsEndTime = 0;
+    const PHYSICS_DURATION = 60000; // 1 minute, long enough to let the layout settle under attraction/tether alone after the wind dies off
+    const restartPhysicsWindow = now => { physicsStartTime = now; physicsEndTime = now + PHYSICS_DURATION; };
+    function regenerateAll(now) { generateNodes(); connectAll(); restartPhysicsWindow(now); particles = []; }
+    function rebuildConnectionsOnly(now) { connectAll(); restartPhysicsWindow(now); }
+    function reseedWindField(now) { perm = buildPermutation(); windT = Math.random() * 1000; buildWindGrid(); restartPhysicsWindow(now); }
+    function stepWindField(dir, now) { windT += dir * WIND_T_STEP; buildWindGrid(); restartPhysicsWindow(now); }
+
+    // ── Controls hint: shown once at startup ───────────────────
+    function startControlsTimeout() {
+        const el = document.getElementById('ui');
+        if (!el) return;
+        setTimeout(() => { el.style.display = 'none'; }, 12000);
+    }
+
+    // ── Initial setup (page load: canvas -> nodes -> connections -> physics) ──
+    buildWindGrid();
+    generateNodes();
+    connectAll();
+    restartPhysicsWindow(performance.now());
+    startControlsTimeout();
+
+    // ── Main loop ─────────────────────────────────────────────
+    let fr = 0;
+    const VISUAL_MAX_DIST = 500; // purely for line-opacity falloff, not an eligibility cutoff
+    let lastFrameTime = performance.now();
+    function loop(now) {
+        requestAnimationFrame(loop);
+        fr++;
+
+        // dt clamped so a backgrounded-tab resume (or the 5min physics-window
+        // gap itself) can't dump a huge jump into the token bucket / particle
+        // aging on the next active frame.
+        const dt = Math.min((now - lastFrameTime) / 1000, .05);
+        lastFrameTime = now;
+
+        // Fade to black (trail persistence)
+        cx.fillStyle = 'rgba(0,0,0,.2)';
+        cx.fillRect(0, 0, W, H);
+
+        if (now < physicsEndTime) {
+            const wf = windFeltFactor(now);
+            for (const n of nd)
+                applyForces(n, wf);
+            spawnParticles(dt);
+            for (let i = particles.length - 1; i >= 0; i--) {
+                if (!updateParticle(particles[i], dt)) {
+                    particles[i] = particles[particles.length - 1];
+                    particles.pop();
+                }
+            }
+        } else {
+            // reset physics timers to keep it animated
+            reseedWindField(now);
+            rebuildConnectionsOnly(now);
+        }
+        // ── Connection lines (each edge lives once, in the child's `upstream`) ──
+        // Colored by the origin node (n) -- the line represents n's own uplink --
+        // using the same hue as n's dot but desaturated/dimmed (see lineColor).
+        for (const n of nd) {
+            cx.lineWidth = n.sz * .35 + 0.3; // line width scales with node size -- depends only on n, so set once per node, not once per edge
+            for (const nb of n.upstream) {
+                const d = dist(n, nb);
+                const alpha = Math.max(0, 1 - d / VISUAL_MAX_DIST) * .55 + .05;
+                cx.strokeStyle = lineColor(n.t, alpha);
+                cx.beginPath(); cx.moveTo(n.x, n.y); cx.lineTo(nb.x, nb.y); cx.stroke();
+            }
+        }
+
+        // ── Particles: drawn after lines, before nodes, so nodes paint over
+        // (visually "absorb") any particle currently sitting at their center ──
+        for (const p of particles) {
+            cx.fillStyle = p.colorPrefix + Math.max(0, Math.min(1, p.brightness)) + ')';
+            cx.beginPath(); cx.arc(p.x, p.y, PARTICLE_RADIUS, 0, 6.2832); cx.fill();
+        }
+
+        // ── Nodes: pulsing dot + a glow scaled by neighbor count, both in the
+        // node's own type color ──
+        cx.font = '9px "Courier New"';
+        cx.textBaseline = 'middle';
+        for (const n of nd) {
+            const pulse = .48 + .38 * Math.sin(fr * .024 + n.ph);
+            const deg = Math.min(n.degree, 8); // cap so a heavily-chosen hub doesn't balloon
+            const glowR = n.sz + 1.5 + deg * .9;
+            cx.fillStyle = nodeColor(n.t, .04 + deg * .018);
+            cx.beginPath(); cx.arc(n.x, n.y, glowR, 0, 6.2832); cx.fill();
+            cx.fillStyle = nodeColor(n.t, pulse);
+            cx.beginPath(); cx.arc(n.x, n.y, n.sz, 0, 6.2832); cx.fill();
+            // Label: precomputed `id:ip` string, dim/type-hued, offset past the glow radius.
+            // Only drawn for the LABEL_FRACTION subset rolled at spawn -- skip the
+            // fillText call entirely for the rest, since that's the expensive part.
+            if (n.hasLabel) {
+                cx.fillStyle = nodeColor(n.t, .5);
+                cx.fillText(n.label, n.x + glowR + 3, n.y);
+            }
+        }
+
+    }
+    requestAnimationFrame(loop);
+
+    // ── Controls: N regenerate nodes, C rebuild connections, W reseed wind,
+    // scroll steps wind time -- every one of these restarts the PHYSICS_DURATION window ──
+    addEventListener('keydown', e => {
+        const k = e.key.toLowerCase(), now = performance.now();
+        if (k === 'n') regenerateAll(now);
+        else if (k === 'c') rebuildConnectionsOnly(now);
+        else if (k === 'w') reseedWindField(now);
+    });
+    addEventListener('wheel', e => {
+        e.preventDefault();
+        stepWindField(e.deltaY > 0 ? 1 : -1, performance.now());
+    }, { passive: false });
+
+</script>
+</body>
+
+</html>

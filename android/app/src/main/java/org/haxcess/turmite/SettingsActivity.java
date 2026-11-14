@@ -26,7 +26,9 @@ public final class SettingsActivity extends Activity {
         SaverSettings current = SaverSettings.load(this);
         SeekBar first = slider(layout, R.string.ants, SaverSettings.ANTS, 2, 8, current.ants, false);
         slider(layout, R.string.minutes, SaverSettings.MINUTES, 1, 50, current.minutesTenths, true);
-        slider(layout, R.string.divisor, SaverSettings.DIVISOR, 1, 100, current.divisor, false);
+        slider(layout, R.string.divisor, SaverSettings.DIVISOR, 1, SaverSettings.MAX_DIVISOR, current.divisor, false);
+        slider(layout, R.string.pixel_size, SaverSettings.PIXEL_SIZE, 1,
+                SaverSettings.MAX_PIXEL_SIZE, current.pixelSize, false);
         TextView note = new TextView(this);
         note.setText(R.string.settings_note);
         layout.addView(note);

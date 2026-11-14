@@ -1,8 +1,14 @@
 # Build products
 /turmite
 /turmite.exe
+/turmite-android.dbg.apk
 src/*.o
 src/*.d
+
+# Not tracking tests
+/tests/
+/tools/
+
 
 # working folders
 /patches/
@@ -13,12 +19,13 @@ src/*.d
 /tools/rule-catalog.js.tmp
 
 # Android local configuration and build products
-/android/.gradle/
-/android/.idea/
-/android/local.properties
+/android/tests/
 /android/build/
+/android/local.properties
 /android/app/build/
 /android/app/.cxx/
+/android/.docker-cache/
+/android/.gradle/
+/android/.idea/
 /android/*.jks
 /android/*.keystore
-/android/.docker-cache/

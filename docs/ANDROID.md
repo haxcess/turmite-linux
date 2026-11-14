@@ -6,6 +6,8 @@ Standalone screensaver (`DreamService`) and phone/TV preview launcher. Package: 
 
 Recommended: [Docker build](ANDROID_DOCKER.md), with no host toolchain installation.
 
+For distribution, use the [optimized release and signing procedure](ANDROID_RELEASE.md).
+
 ### Local toolchain
 
 Install JDK 17 or 21, Gradle 8.11.1, and Android SDK command-line tools or Android Studio. Set `JAVA_HOME`, add Gradle to `PATH`, and set `ANDROID_HOME` (or `sdk.dir` in `android/local.properties`). No Gradle wrapper is bundled in this initial scaffold.
@@ -27,11 +29,12 @@ Open **Configure Turmite** in the launcher or the screensaver settings button ex
 
 | Slider | Range / step | Default |
 | --- | --- | --- |
-| Ants | 2–8 / 1 | 8 |
+| Ants | 2–8 / 1 | 3 |
 | Universe lifetime | 0.1–5 minutes / 0.1 | 5 |
-| Token-rate divisor | 1–100 / 1 | 1 |
+| Token-rate divisor | 1–1,000 / 1 | 250 |
+| Pixel size (screen pixels per cell) | 1–16 / 1 | 3 |
 
-Values persist automatically and apply on the next preview/dream start. Touch or TV D-pad adjusts sliders; Up/Down moves focus, Left/Right changes one step. Larger divisor slows refill. Lifetime triggers reseeding, not app exit. Android runs one universe per active preview/dream, without Q dumps, monitor enumeration, CLI, or HUD. CMake excludes Linux `main.c`, `dump.c`, and `renderer_sdl.c`.
+Values persist automatically and apply on the next preview/dream start. Defaults apply to unset preferences; existing saved choices are retained. Touch or TV D-pad adjusts sliders; Up/Down moves focus, Left/Right changes one step. Larger divisor slows refill. Lifetime triggers reseeding, not app exit. Android runs one universe per active preview/dream, without Q dumps, monitor enumeration, CLI, or HUD. CMake excludes Linux `main.c`, `dump.c`, and `renderer_sdl.c`.
 
 Fedora installation: [build environment](ANDROID_FEDORA.md).
 
@@ -46,7 +49,7 @@ Fedora installation: [build environment](ANDROID_FEDORA.md).
 | `engine.c` | World, colony, scheduler, two pthread workers |
 | Shared C sources | Rules, mutations, scheduling, logical tape, palette |
 
-Android defaults: 8 ants, quantum 64, minimum service 16, divisor 1, five-minute reseeding, ~30 FPS. These host settings are independent of Linux CLI defaults. Canvas preserves aspect ratio, caps longest side at 960 cells, and scales with nearest-neighbor sampling. Settings apply to both preview and screensaver.
+Android defaults: 3 ants, quantum 64, minimum service 16, divisor 250, pixel size 3, five-minute reseeding, ~30 FPS. These host settings are independent of Linux CLI defaults. Canvas derives the grid from the selected screen pixels per cell, caps the longest side at 960 cells, and fills the surface with nearest-neighbor sampling. The cap can enlarge cells beyond the selected pixel size on high-resolution displays; rounding grid dimensions can also slightly affect the effective cell size. Settings apply to both preview and screensaver. Each new universe generates a stable randomish palette from its seed, with color 0 overridden to true black (`#000000`) and colors 1–5 taken from the shared randomish generator. Palette generation does not advance the simulation RNG. Output remains opaque 8-bit ARGB; this does not enable HDR rendering.
 
 Lifecycle stop/surface destruction interrupts and joins the frame thread; native destruction stops the scheduler and joins ant workers before releasing state. Resize creates a fresh universe. Native state is 64-byte aligned for `AntColony`. Frame samples remain non-transactional. Bitmap/JNI copies are an initial backend; profile on hardware before increasing resolution.
 
@@ -60,9 +63,9 @@ cmake --build /tmp/turmite-android-host
 ctest --test-dir /tmp/turmite-android-host --output-on-failure
 ```
 
-Coverage: repeated create/render/destroy, worker progress, shared palette, all ant counts 2–8, divisor endpoints, invalid settings/bounds. Android build/lint: `sh android/build.sh assembleDebug lintDebug`.
+Coverage: repeated create/render/destroy, worker progress, seeded randomish palette with true-black background, all ant counts 2–8, divisor endpoints, invalid settings/bounds. Android build/lint: `sh android/build.sh assembleDebug lintDebug`.
 
-Device checks: phone/TV launcher, D-pad navigation, system dream preview, normal idle activation, input exit, repeated start/stop, orientation/surface recreation, worker shutdown, sustained temperature/CPU use. Verify ARM32/ARM64 and 16 KB page-size compatibility. No device or APK validation has been performed for this scaffold.
+Device checks: phone/TV launcher, D-pad navigation, system dream preview, normal idle activation, input exit, repeated start/stop, orientation/surface recreation, worker shutdown, sustained temperature/CPU use. Verify ARM32/ARM64 and 16 KB page-size compatibility. Docker debug/release compilation, lint and release APK verification passed on 2026-11-13. Device execution remains unverified.
 
 ## References
 

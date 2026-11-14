@@ -26,6 +26,35 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
     buildTypes {
-        release { minifyEnabled false }
+        release {
+            debuggable false
+            jniDebuggable false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            ndk { debugSymbolLevel 'none' }
+            externalNativeBuild {
+                cmake { arguments '-DCMAKE_BUILD_TYPE=Release' }
+            }
+        }
+    }
+}
+
+// Omit Java source/line/local-variable debug metadata before R8 processing.
+tasks.withType(JavaCompile).configureEach {
+    if (name == 'compileReleaseJavaWithJavac') {
+        options.debug = false
+    }
+}
+
+// Inspect the packaged artifact, not just the intermediate native libraries.
+tasks.register('verifyReleaseApk') {
+    dependsOn 'assembleRelease'
+    doLast {
+        exec {
+            commandLine 'sh', rootProject.file('verify-release.sh'),
+                layout.buildDirectory.file('outputs/apk/release/app-release-unsigned.apk').get().asFile,
+                android.ndkDirectory, android.sdkDirectory
+        }
     }
 }

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#000000">
+  <title>Turmite Universe</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="rules.js"></script>
+  <script defer src="universe.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <canvas id="universe" aria-label="Animated turmites drawing on a shared, wrapping six-color universe"></canvas>
+  <header><span>TURMITE<span class="dim"> / UNIVERSE</span></span><button id="help-toggle" aria-controls="help" aria-expanded="true">? controls</button></header>
+  <section id="help" aria-label="Universe controls">
+    <div class="bar"><span>▪ ▪ ▪</span><span>turmite universe — controls</span><button id="close-help" aria-label="Hide controls">×</button></div>
+    <div class="body">
+      <p class="prompt">universe:~$ help</p>
+      <p class="intro">Small machines. Shared memory. Emergent worlds.</p>
+      <div class="controls">
+        <button data-action="pause"><kbd>Space</kbd> Pause / resume</button>
+        <button data-action="mutate"><kbd>M</kbd> Collision mutation</button>
+        <button data-action="reset"><kbd>R</kbd> Reseed universe</button>
+        <button data-action="theme"><kbd>C</kbd> New color theme</button>
+        <button data-action="slower"><kbd>[</kbd> Slower</button>
+        <button data-action="faster"><kbd>]</kbd> Faster</button>
+        <button data-action="remove"><kbd>−</kbd> Remove a turmite</button>
+        <button data-action="add"><kbd>+</kbd> Add a turmite</button>
+        <button data-action="hud"><kbd>H</kbd> Toggle statistics</button>
+        <button data-action="fullscreen"><kbd>F</kbd> Fullscreen</button>
+      </div>
+      <p class="foot">Hides after 12 seconds. Press <kbd>?</kbd> to bring it back.<br>Click or tap the canvas to plant a turmite.</p>
+    </div>
+  </section>
+  <output id="stats" hidden></output>
+  <output id="notice" role="status" aria-live="polite"></output>
+  <noscript>This universe needs JavaScript enabled.</noscript>
+</body>
+</html>

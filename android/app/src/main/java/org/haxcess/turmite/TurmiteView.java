@@ -48,12 +48,14 @@ final class TurmiteView extends SurfaceView implements SurfaceHolder.Callback {
 
     private void startFrames() {
         if (!active || frameThread != null || surfaceWidth <= 0 || surfaceHeight <= 0) return;
-        double scale = Math.min(1.0, MAX_SIDE / (double)Math.max(surfaceWidth, surfaceHeight));
+        final SaverSettings settings = SaverSettings.load(getContext());
+        // Screen pixels per simulation cell, subject to the native size limit.
+        double scale = Math.min(1.0 / settings.pixelSize,
+                MAX_SIDE / (double)Math.max(surfaceWidth, surfaceHeight));
         final int w = Math.max(1, (int)(surfaceWidth * scale));
         final int h = Math.max(1, (int)(surfaceHeight * scale));
         // Unusually small transient surfaces cannot safely hold the initial population.
         if (w < 16 || h < 16) return;
-        final SaverSettings settings = SaverSettings.load(getContext());
         stopping = false;
         frameThread = new Thread(() -> renderLoop(w, h, settings), "turmite-frames");
         frameThread.start();

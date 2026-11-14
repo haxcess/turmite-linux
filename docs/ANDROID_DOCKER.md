@@ -11,7 +11,7 @@ Run these commands in a terminal on the machine where Docker is installed.
 1. Open the repository and check Docker:
 
    ```sh
-   cd /home/alex/Coding/turmite/turmite-linux
+   cd ~/turmite-linux
    docker version
    docker info
    ```
@@ -42,6 +42,16 @@ Run these commands in a terminal on the machine where Docker is installed.
    ```
 
 4. Find the APK at `android/app/build/outputs/apk/debug/app-debug.apk`. Continue with the installation steps below.
+
+## Optimized release
+
+For a stripped, optimized distribution build, follow [Android release builds and signing](ANDROID_RELEASE.md):
+
+```sh
+sh android/container-build.sh verifyReleaseApk lintRelease
+```
+
+This produces an unsigned release APK; the guide includes Docker-based signing steps. The debug commands elsewhere on this page are for development.
 
 ## Subsequent builds
 
@@ -114,6 +124,6 @@ Keep the persistent debug signing key described above so subsequent builds can u
 
 Docker unavailable: check `docker version` and daemon/socket access. SDK-version errors: keep the Dockerfile packages synchronized with `android/app/build.gradle`. Run with `--stacktrace` for Gradle diagnostics.
 
-Validation of this addition: shell syntax and mocked launcher/entrypoint tests. Image download/build, Gradle compilation, and device execution require a Docker-enabled host and remain unverified here.
+Validated on 2026-11-13 using the Docker build: `assembleDebug lintDebug verifyReleaseApk lintRelease --rerun-tasks` completed successfully (105 tasks executed). Release checks passed for ARM32, ARM64 and x86-64 stripping, JNI entrypoints, manifest and ZIP alignment. Device execution and release signing remain separate checks.
 
 [Gradle checksums](https://gradle.org/release-checksums/) · [Android tools](https://developer.android.com/studio#command-tools) · [Device debugging](https://developer.android.com/studio/run/device)

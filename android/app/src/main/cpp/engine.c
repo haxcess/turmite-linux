@@ -17,6 +17,7 @@ struct AndroidEngine {
     size_t started;
     bool colony_ready, scheduler_ready;
     uint8_t *snapshot;
+    uint32_t palette[TURMITE_COLORS];
 };
 
 static uint64_t now_us(void)
@@ -41,7 +42,7 @@ static void *worker(void *arg)
 AndroidEngine *android_engine_create(int width, int height, uint32_t seed, int ants, int divisor)
 {
     if (width < 16 || height < 16 || width > MAX_SIDE || height > MAX_SIDE) return NULL;
-    if (ants < 2 || ants > 8 || divisor < 1 || divisor > 100) return NULL;
+    if (ants < 2 || ants > 8 || divisor < 1 || divisor > 1000) return NULL;
     // AntColony contains an alignas(64) member; plain malloc need not satisfy it.
     AndroidEngine *engine = NULL;
     if (posix_memalign((void **)&engine, _Alignof(AndroidEngine), sizeof(*engine)) != 0) return NULL;
@@ -49,7 +50,11 @@ AndroidEngine *android_engine_create(int width, int height, uint32_t seed, int a
     if (world_init(&engine->world, width, height) != 0) goto fail;
     if (ant_colony_init(&engine->colony, &engine->world) != 0) goto fail;
     engine->colony_ready = true;
-    rng_seed(&engine->rng, seed ? seed : rng_entropy_seed());
+    const uint32_t universe_seed = seed ? seed : rng_entropy_seed();
+    rng_seed(&engine->rng, universe_seed);
+    // Palette generation uses a private stream, preserving simulation randomness.
+    render_palette_init(engine->palette, RENDER_PALETTE_RANDOM, universe_seed);
+    engine->palette[0] = 0x000000u; // Opaque black is added by render_argb.
     for (size_t i = 0; i < (size_t)ants; ++i) {
         const TurmiteRule *rule = rules_get(rng_uniform(&engine->rng, (uint32_t)rules_count()));
         ant_randomize(&engine->colony.ants[i], &engine->colony, &engine->world, &engine->rng, rule);
@@ -77,7 +82,7 @@ bool android_engine_frame(AndroidEngine *engine, uint32_t *argb, size_t capacity
     for (size_t i = 0; i < engine->world.cells; ++i)
         engine->snapshot[i] = world_load(&engine->world, i);
     RenderFrame frame = { (size_t)engine->world.width, (size_t)engine->world.height, engine->snapshot };
-    return render_argb(&frame, RENDER_BASE_PALETTE, argb, capacity);
+    return render_argb(&frame, engine->palette, argb, capacity);
 }
 
 size_t android_engine_population(const AndroidEngine *engine)

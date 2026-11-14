@@ -298,6 +298,13 @@ static const TurmiteRule RULES[] = {
         {
         { A(2, TURN_R, 0), A(0, TURN_L, 0), A(1, TURN_R, 0), A(0, TURN_H, 0) }
         }
+    },
+    {
+        "phonelines_mk2", "phonelines mk2", 2, 4,
+        {
+        { A(2, TURN_R, 0), A(0, TURN_L, 0), A(1, TURN_R, 0), A(1, TURN_F, 1) },
+        { A(3, TURN_R, 1), A(1, TURN_L, 1), A(2, TURN_R, 1), A(2, TURN_F, 0) }
+        }
     }
 };
 
