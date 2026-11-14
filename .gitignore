@@ -13,6 +13,7 @@ src/*.d
 # working folders
 /patches/
 /turmite-dumps/
+/.vscode/
 
 # Rule-lab build and test products
 /tools/export_rule_catalog
@@ -29,3 +30,10 @@ src/*.d
 /android/.idea/
 /android/*.jks
 /android/*.keystore
+
+# ESP-IDF generated files and device backups
+/esp32/build/
+/esp32/sdkconfig
+/esp32/sdkconfig.old
+/esp32/.build.lock
+/esp32/backups/

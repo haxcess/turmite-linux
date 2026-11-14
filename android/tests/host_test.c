@@ -13,16 +13,20 @@ int main(void)
     CHECK(!android_engine_create(64, 48, 1, 1, 1));
     CHECK(!android_engine_create(64, 48, 1, 9, 1));
     CHECK(!android_engine_create(64, 48, 1, 2, 0));
-    CHECK(!android_engine_create(64, 48, 1, 2, 101));
+    CHECK(!android_engine_create(64, 48, 1, 2, 1001));
     CHECK(!android_engine_frame(NULL, pixels, 64 * 48));
     android_engine_destroy(NULL);
     AndroidEngine *survivor = android_engine_create(64, 48, 123, 8, 1);
     CHECK(survivor);
     for (unsigned cycle = 0; cycle < 30; ++cycle) {
         int ants = 2 + (int)(cycle % 7);
-        int divisor = cycle % 2 ? 100 : 1;
+        const int divisors[] = { 1, 250, 1000 };
+        int divisor = divisors[cycle % 3];
         AndroidEngine *engine = android_engine_create(64, 48, cycle + 1, ants, divisor);
         CHECK(engine);
+        uint32_t expected_palette[TURMITE_COLORS];
+        render_palette_init(expected_palette, RENDER_PALETTE_RANDOMISH, cycle + 1);
+        expected_palette[0] = 0;
         CHECK(android_engine_population(engine) == (size_t)ants);
         CHECK(android_engine_divisor(engine) == (uint32_t)divisor);
         CHECK(!android_engine_frame(engine, pixels, 1));
@@ -37,7 +41,7 @@ int main(void)
             for (size_t i = 0; i < 64 * 48; ++i) {
                 bool valid = false;
                 for (size_t color = 0; color < TURMITE_COLORS; ++color)
-                    if (pixels[i] == (UINT32_C(0xff000000) | RENDER_BASE_PALETTE[color])) valid = true;
+                    if (pixels[i] == (UINT32_C(0xff000000) | expected_palette[color])) valid = true;
                 CHECK(valid);
             }
         }

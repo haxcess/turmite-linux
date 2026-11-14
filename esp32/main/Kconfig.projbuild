@@ -1,0 +1,22 @@
+menu "Turmite Waveshare 7B"
+config TURMITE_ANTS
+    int "Initial ant count"
+    range 2 32
+    default 3
+config TURMITE_DIVISOR
+    int "Token-rate divisor"
+    range 1 1000
+    default 250
+config TURMITE_CELL_SIZE
+    int "Display pixels per cell (rounded at edges)"
+    range 2 16
+    default 3
+config TURMITE_LIFETIME_SECONDS
+    int "Universe lifetime in seconds (0 disables reseeding)"
+    range 0 3600
+    default 300
+config TURMITE_FPS
+    int "Maximum rendered frames per second"
+    range 1 30
+    default 20
+endmenu

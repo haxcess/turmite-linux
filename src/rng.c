@@ -1,9 +1,13 @@
 #include "rng.h"
 
+#ifdef ESP_PLATFORM
+#include "esp_random.h"
+#else
 #include <fcntl.h>
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
+#endif
 
 /* Zero is the absorbing state of an LFSR, so remap it to a non-zero seed. */
 void rng_seed(Lfsr32 *rng, uint32_t seed)
@@ -39,6 +43,10 @@ uint32_t rng_uniform(Lfsr32 *rng, uint32_t upper_exclusive)
  * startup still works on constrained hosts. Explicit --seed bypasses this. */
 uint32_t rng_entropy_seed(void)
 {
+#ifdef ESP_PLATFORM
+    uint32_t seed = esp_random();
+    return seed ? seed : 0x1u;
+#else
     uint32_t seed = 0;
     int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
     if (fd >= 0) {
@@ -52,4 +60,5 @@ uint32_t rng_entropy_seed(void)
     pid_t p = getpid();
     seed = (uint32_t)(t ^ (t >> 32) ^ c ^ ((uint64_t)p << 16));
     return seed ? seed : 0x1u;
+#endif
 }

@@ -19,3 +19,5 @@ Commands and source paths are relative to the repository root.
 | [STM32](stm32/README.md) | Scaffold and proposed architecture |
 | [STM32 integration](stm32/INTEGRATION.md) | Bring-up checklist |
 | [History](history/OPTIMIZATION_NOTES.md) | Earlier layouts and measurements |
+
+[Waveshare ESP32-S3-Touch-LCD-7B build and flashing](ESP32_WAVESHARE_7B.md)

@@ -273,6 +273,16 @@ Ant *scheduler_acquire(Scheduler *scheduler, uint64_t now_us, size_t *granted_qu
             if (deadline < earliest) deadline = earliest;
             struct timespec ts = { (time_t)(deadline / 1000000u),
                                   (long)(deadline % 1000000u) * 1000L };
+#ifdef ESP_PLATFORM
+            /* ESP-IDF condition variables use realtime; token deadlines remain
+             * monotonic. Translate only the relative wait at the boundary. */
+            uint64_t current = monotonic_us();
+            uint64_t delay = deadline > current ? deadline - current : 0;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            uint64_t ns = (uint64_t)ts.tv_nsec + (delay % 1000000u) * 1000u;
+            ts.tv_sec += (time_t)(delay / 1000000u + ns / 1000000000u);
+            ts.tv_nsec = (long)(ns % 1000000000u);
+#endif
             pthread_cond_timedwait(&scheduler->work_available, &scheduler->lock, &ts);
         }
         now_us = monotonic_us();
@@ -450,9 +460,17 @@ int scheduler_init(Scheduler *scheduler, AntColony *colony, SchedulerPolicy poli
         scheduler->recovery_at_us[i] = 0;
     }
 
-    /* The condition variable uses CLOCK_MONOTONIC so wall-clock adjustments do
-     * not perturb token-service timing. */
+    /* Prefer monotonic condition deadlines. ESP-IDF only supports realtime
+     * conditions, so scheduler_acquire translates its relative wait there. */
     if (pthread_mutex_init(&scheduler->lock, NULL) != 0) return -1;
+#ifdef ESP_PLATFORM
+    /* IDF 5.5 condition-attribute initialization returns ENOSYS. Use the
+     * supported default realtime condition, translating deadlines above. */
+    if (pthread_cond_init(&scheduler->work_available, NULL) != 0) {
+        pthread_mutex_destroy(&scheduler->lock);
+        return -1;
+    }
+#else
     pthread_condattr_t attr;
     if (pthread_condattr_init(&attr) != 0) {
         pthread_mutex_destroy(&scheduler->lock);
@@ -465,6 +483,7 @@ int scheduler_init(Scheduler *scheduler, AntColony *colony, SchedulerPolicy poli
         return -1;
     }
     pthread_condattr_destroy(&attr);
+#endif
     return 0;
 }
 
